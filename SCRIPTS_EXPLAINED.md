@@ -1,40 +1,40 @@
-# Our scripts, explained in plain English
+# Script Guide
 
-This guide walks through every file in the repo and what each part does. No database
-background needed.
+This file explains what each script in the repo does, step by step.
 
-## Quick glossary
+## Terms used
 
-- **Database**: a collection of tables, like a workbook with many sheets.
-- **Table**: one sheet of data, with rows and columns.
-- **CSV file**: a plain-text spreadsheet. Each line is a row, commas separate the columns.
-- **SQL**: the language we use to talk to the database.
-- **Primary key (PK)**: a column whose value is unique for every row, like an ID number.
-- **Foreign key (FK)**: a column that points to the primary key of another table. It makes
-  sure the two tables line up (you can't have a score for a hospital that doesn't exist).
-- **NULL**: "no value" or "unknown". Different from zero.
-- **pgAdmin**: the app we use to look at and run things in PostgreSQL.
-- **PSQL Tool**: a command window inside pgAdmin. It can run a whole script file at once.
-- **Metabase**: a tool for making charts and dashboards from our database.
-- **Docker**: runs Metabase inside a "container" on our laptop, so we don't install it directly.
+- **Database**: a set of tables, similar to a workbook with many sheets.
+- **Table**: one sheet of data with rows and columns.
+- **CSV file**: a text file where each line is a row and commas separate the columns.
+- **SQL**: the language used to create tables and query data.
+- **Primary key (PK)**: a column with a unique value for every row, like an ID number.
+- **Foreign key (FK)**: a column that points to the primary key of another table. The
+  database uses it to check that the two tables match. For example, a score cannot be
+  saved for a hospital that does not exist.
+- **NULL**: no value. This is not the same as zero.
+- **pgAdmin**: the program we use to work with PostgreSQL.
+- **PSQL Tool**: a command window inside pgAdmin that can run a whole script file.
+- **Metabase**: the program we use to make charts and dashboards.
+- **Docker**: runs Metabase inside a container on our laptops.
 
-## The files
+## Files in the repo
 
-| File | What it's for |
+| File | Purpose |
 |---|---|
-| `create_and_load.sql` | Builds the whole database from scratch |
-| `exploration.sql` | 13 questions we ask the data (run automatically at the end of the build) |
-| `metabase_setup.py` | Connects Metabase to our database and makes a starter dashboard |
-| `run.sh` | Optional: runs `create_and_load.sql` from Terminal instead of pgAdmin |
-| `README.md` | Project overview and how to run it |
+| `create_and_load.sql` | Builds the database from the beginning |
+| `exploration.sql` | 13 exploratory queries (they also run at the end of the build) |
+| `metabase_setup.py` | Connects Metabase to the database and creates a dashboard |
+| `run.sh` | Optional. Runs `create_and_load.sql` from Terminal instead of pgAdmin |
+| `README.md` | Project overview and instructions |
 
 ---
 
 ## 1. create_and_load.sql
 
-Think of this script as a recipe. It runs top to bottom, in 6 steps.
+The script runs from top to bottom in 7 steps.
 
-### Settings at the top
+### Settings
 
 ```sql
 \set ON_ERROR_STOP on
@@ -42,13 +42,12 @@ Think of this script as a recipe. It runs top to bottom, in 6 steps.
 \pset pager off
 ```
 
-- `ON_ERROR_STOP on`: if anything goes wrong, stop right there instead of carrying on
-  with broken data.
-- `footer off`: don't print "(5 rows)" under every result. Just keeps the output tidy.
-- `pager off`: show all results at once instead of pausing with "(END)".
+- `ON_ERROR_STOP on`: if any statement fails, the script stops at that point.
+- `footer off`: hides the "(5 rows)" line under each result.
+- `pager off`: shows all results at once instead of pausing at "(END)".
 
-Lines starting with a backslash (`\`) are instructions for the PSQL Tool itself, not SQL.
-That's why this script needs the PSQL Tool rather than the Query Tool.
+Lines that start with a backslash (`\`) are commands for the PSQL Tool, not SQL. The
+Query Tool does not understand them, so this script is run in the PSQL Tool.
 
 ### Step 1: Create the database
 
@@ -60,14 +59,15 @@ CREATE DATABASE hospital_quality;
 SET datestyle = 'ISO, MDY';
 ```
 
-- `\c postgres`: connect to the default database first (you can't delete a database
-  while you're inside it).
-- `DROP DATABASE IF EXISTS ...`: delete our old database if there is one, so every run
-  starts fresh. `WITH (FORCE)` kicks out anything still connected to it, like Metabase.
-- `CREATE DATABASE hospital_quality`: make a new, empty database.
-- `\c hospital_quality`: move into the new database. Everything after this happens inside it.
-- `SET datestyle = 'ISO, MDY'`: tells Postgres that dates like `07/01/2024` mean
-  month/day/year (US style), which is how CMS writes them.
+- `\c postgres`: connects to the default database. A database cannot be deleted while
+  we are connected to it, so we move out of it first.
+- `DROP DATABASE IF EXISTS ...`: deletes the old database if one exists, so every run
+  starts from zero. `WITH (FORCE)` closes other connections to it, such as Metabase.
+- `CREATE DATABASE hospital_quality`: creates a new, empty database.
+- `\c hospital_quality`: connects to the new database. Everything after this line
+  happens inside it.
+- `SET datestyle = 'ISO, MDY'`: tells PostgreSQL that a date like `07/01/2024` is
+  month/day/year, which is the format CMS uses.
 
 ### Step 2: Raw tables
 
@@ -77,12 +77,13 @@ CREATE TEMP TABLE raw_hospital_info (
 );
 ```
 
-- We make 6 **temporary** tables, one for each CSV file. Temporary means they disappear
-  automatically when the script finishes, so they never clutter the database.
-- Every column is `TEXT` (plain text). CMS puts words like "Not Available" inside number
-  columns, so if we tried to load them straight into number columns, the load would fail.
-  Loading as text first, then cleaning, avoids that.
-- The columns are listed in the exact order they appear in each CSV file.
+- There are 6 raw tables, one for each CSV file.
+- `TEMP` means the table is temporary. It is deleted automatically when the script
+  finishes.
+- Every column is `TEXT`. CMS writes words such as "Not Available" inside number
+  columns. Loading those into a number column would fail, so we load everything as
+  text first and convert it in step 5.
+- The columns are in the same order as the columns in the CSV file.
 
 ### Step 3: Download and load the CMS files
 
@@ -94,25 +95,27 @@ COPY raw_hospital_info FROM PROGRAM
     WITH (FORMAT csv, HEADER true);
 ```
 
-This one statement does four things, in order (`&&` means "and then, if that worked"):
+The text inside the quotes is a list of Mac Terminal commands. `&&` means "then, if the
+previous command worked":
 
-1. `mkdir -p /Users/Shared/hospital_quality_data`: make the folder if it doesn't exist.
-   We use `/Users/Shared` because every Mac has it and Postgres is allowed to write there.
-2. `cd ...`: go into that folder.
-3. `curl ... -o Hospital_General_Information.csv "https://..."`: download the file from
-   the CMS website and save it. The link uses the dataset's permanent ID (`xubh-q36u`),
-   so it keeps working when CMS updates the data every quarter.
-4. `cat Hospital_General_Information.csv`: read the file out so `COPY` can load it.
+1. `mkdir -p /Users/Shared/hospital_quality_data`: creates the folder if it does not
+   exist. Every Mac has `/Users/Shared`, and PostgreSQL is allowed to write there.
+2. `cd ...`: moves into that folder.
+3. `curl ... -o Hospital_General_Information.csv "https://..."`: downloads the file
+   from the CMS website and saves it in the folder. The link contains the permanent
+   dataset ID (`xubh-q36u`), so it still works after CMS updates the data.
+4. `cat Hospital_General_Information.csv`: reads the file so COPY can load it.
 
-- `COPY raw_hospital_info FROM PROGRAM ...`: put whatever that program outputs into the
-  raw table.
-- `FORMAT csv`: the data is comma-separated.
-- `HEADER true`: skip the first line, because it has column names, not data.
+The rest of the statement:
+- `COPY raw_hospital_info FROM PROGRAM ...`: loads the output of those commands into
+  the raw table.
+- `FORMAT csv`: the data is separated by commas.
+- `HEADER true`: skips the first line, which has the column names.
 
-The same pattern repeats for all 6 files. If a download fails (no internet), the script
-stops with an error because of `ON_ERROR_STOP`.
+The same statement is repeated for all 6 files. If a download fails, for example with
+no internet, the script stops with an error.
 
-### Step 4: Dimension tables (the "who, what, when")
+### Step 4: Dimension tables
 
 ```sql
 CREATE TABLE dim_hospital (
@@ -125,23 +128,21 @@ CREATE TABLE dim_hospital (
 );
 ```
 
-- `dim_hospital` has one row per hospital. `facility_id` is the **primary key**, so no
-  two hospitals can share an ID.
-- `facility_id` and `zip_code` stay as text on purpose: they have leading zeros
-  (`010001`) that would be lost if stored as numbers.
-- `NOT NULL`: this column must always have a value.
-- `CHAR(2)`: exactly 2 letters (state codes like `CA`).
+- `dim_hospital` has one row per hospital. `facility_id` is the primary key.
+- `facility_id` and `zip_code` are stored as text because they have leading zeros
+  (`010001`). Storing them as numbers would remove the zeros.
+- `NOT NULL`: the column must have a value.
+- `CHAR(2)`: exactly 2 characters, for state codes such as `CA`.
 - `BOOLEAN`: true or false.
-- `SMALLINT CHECK (... BETWEEN 1 AND 5)`: a small whole number, and the database refuses
-  anything outside 1 to 5 (star ratings).
+- `SMALLINT CHECK (... BETWEEN 1 AND 5)`: a small whole number between 1 and 5. The
+  database rejects any other value.
 
-We also make:
-- `dim_measure`: one row per thing CMS measures (like "heart failure death rate"), with
-  which category it belongs to.
-- `dim_period`: one row per date range the measures cover. `SERIAL` means Postgres
-  numbers the rows 1, 2, 3... automatically.
+Two more dimension tables are created:
+- `dim_measure`: one row per measure (for example, the heart failure death rate), with
+  its category.
+- `dim_period`: one row per date range. `SERIAL` numbers the rows 1, 2, 3 automatically.
 
-Then we fill them from the raw tables:
+The dimension tables are filled from the raw tables:
 
 ```sql
 INSERT INTO dim_hospital
@@ -154,23 +155,24 @@ SELECT LPAD(facility_id, 6, '0'),
 FROM raw_hospital_info;
 ```
 
-- `INSERT INTO ... SELECT ...`: copy rows from one table into another, cleaning them on the way.
-- `LPAD(facility_id, 6, '0')`: pad the ID with zeros on the left to make it 6 characters.
-  Some CMS files drop the leading zero (`10001` instead of `010001`).
-- `CASE ... WHEN 'Yes' THEN TRUE ...`: turn the words Yes/No into true/false.
-- `COALESCE(x = 'Y', FALSE)`: the birthing-friendly column is either "Y" or blank.
-  This says "true if Y, otherwise false".
-- `CASE WHEN rating IN ('1',...,'5') THEN rating::SMALLINT END`: only keep ratings that
-  are 1 to 5. Anything else (like "Not Available") becomes NULL. `::SMALLINT` converts
-  text to a number.
+- `INSERT INTO ... SELECT ...`: copies rows from one table to another and cleans them
+  at the same time.
+- `LPAD(facility_id, 6, '0')`: adds zeros on the left until the ID has 6 characters.
+  Some CMS files write `10001` instead of `010001`.
+- `CASE ... WHEN 'Yes' THEN TRUE ...`: changes Yes/No into true/false.
+- `COALESCE(x = 'Y', FALSE)`: the birthing friendly column is either "Y" or blank. The
+  result is true for "Y" and false otherwise.
+- `CASE WHEN rating IN ('1',...,'5') THEN rating::SMALLINT END`: keeps only ratings from
+  1 to 5 and converts them to numbers. Any other value, such as "Not Available", becomes
+  NULL. `::SMALLINT` converts text to a number.
 
-For `dim_measure`, `GROUP BY measure_id` gives one row per measure, and `UNION ALL` stacks
-the measures from all 5 files into one list.
+For `dim_measure`, `GROUP BY measure_id` gives one row per measure, and `UNION ALL`
+combines the measures from all 5 files into one list.
 
-For `dim_period`, `UNION` stacks the date ranges from all files and removes duplicates.
-`start_date::DATE` converts the text into a real date.
+For `dim_period`, `UNION` combines the date ranges from all files and removes
+duplicates. `start_date::DATE` converts the text to a date.
 
-### Step 5: Fact tables (the actual measurements)
+### Step 5: Fact tables
 
 ```sql
 CREATE TABLE fact_complications_deaths (
@@ -183,18 +185,18 @@ CREATE TABLE fact_complications_deaths (
 );
 ```
 
-- Each row is **one hospital's result on one measure**.
-- `REFERENCES dim_hospital (facility_id)`: this is a **foreign key**. The database checks
-  that every hospital ID here exists in `dim_hospital`.
-- `PRIMARY KEY (facility_id, measure_id)`: the combination of hospital + measure must be
-  unique (a hospital can't have two results for the same measure).
+- Each row is one hospital's result on one measure.
+- `REFERENCES dim_hospital (facility_id)` is a foreign key. The database checks that
+  every facility ID in this table also exists in `dim_hospital`.
+- `PRIMARY KEY (facility_id, measure_id)`: each hospital can have only one result per
+  measure.
 - `NUMERIC`: a number that can have decimals.
 
-We make 5 of these: complications/deaths, infections, unplanned visits, patient survey,
-and spending. Together with the 3 dimension tables, this is our **star schema**: the
-dimension tables sit around the fact tables like points of a star.
+There are 5 fact tables: complications and deaths, infections, unplanned visits,
+patient survey, and spending. With the 3 dimension tables, they form a star schema:
+the fact tables are in the middle and each one links to the dimension tables.
 
-Filling them:
+The fact tables are filled like this:
 
 ```sql
 INSERT INTO fact_complications_deaths
@@ -208,21 +210,20 @@ LEFT JOIN dim_period p ON p.start_date = NULLIF(r.start_date, '')::DATE
                       AND p.end_date   = NULLIF(r.end_date, '')::DATE;
 ```
 
-- `NULLIF(x, 'Not Available')`: if the value is "Not Available", make it NULL.
-  Doing it twice also turns empty text into NULL.
-- `CASE WHEN r.score ~ '^-?[0-9.]+$' THEN r.score::NUMERIC END`: `~` checks a pattern.
-  This pattern means "only digits, a decimal point, and maybe a minus sign", in other
-  words "looks like a number". If it does, convert it to a number. If not
-  ("Not Available", "--"), it becomes NULL.
+- `NULLIF(x, 'Not Available')`: returns NULL when the value is "Not Available". The
+  second `NULLIF` does the same for empty text.
+- `CASE WHEN r.score ~ '^-?[0-9.]+$' THEN r.score::NUMERIC END`: `~` compares the value
+  with a pattern. This pattern allows only digits, a decimal point and a minus sign, so
+  it checks whether the value is a number. Numbers are converted. Anything else, such
+  as "Not Available" or "--", becomes NULL.
 - `REPLACE(x, ',', '')` (used for counts): removes commas, so "1,204" becomes "1204".
-- `JOIN dim_hospital h ON ...`: only keep rows for hospitals that exist in `dim_hospital`.
-  This is what guarantees the foreign keys never fail.
-- `LEFT JOIN dim_period p ON ...`: look up the period number for each row's date range.
-  `LEFT` means keep the row even if no period matches.
-- The letters `r`, `h`, `p` are short nicknames for the tables, so we don't have to type
-  full names every time.
+- `JOIN dim_hospital h ON ...`: keeps only rows for hospitals that are in
+  `dim_hospital`. This keeps the foreign keys valid.
+- `LEFT JOIN dim_period p ON ...`: finds the period number for each date range.
+  `LEFT JOIN` keeps the row even when no period matches.
+- `r`, `h` and `p` are short names (aliases) for the tables.
 
-### load_log: a record of what was loaded
+### load_log table
 
 ```sql
 INSERT INTO load_log (dataset_id, title, local_file, rows_loaded) VALUES
@@ -230,19 +231,19 @@ INSERT INTO load_log (dataset_id, title, local_file, rows_loaded) VALUES
  (SELECT COUNT(*) FROM raw_hospital_info)), ...
 ```
 
-- One row per CMS file: its ID, name, where it was saved, and how many rows it had.
+- One row per CMS file, with its ID, name, saved location and number of rows.
 - `(SELECT COUNT(*) FROM raw_hospital_info)`: counts the rows in the raw table.
-- `loaded_at TIMESTAMP DEFAULT now()`: automatically records the date and time.
+- `loaded_at TIMESTAMP DEFAULT now()`: saves the date and time of the load.
 
 ### Step 6: Load checks
 
-- **6a. Rows in raw files vs rows loaded**: counts rows before and after cleaning. If the
-  two numbers match, nothing got lost.
-- **6b. Rows with no score**: how many results CMS reported as "Not Available".
-  `SUM(CASE WHEN score IS NULL THEN 1 ELSE 0 END)` counts 1 for every missing score.
-- **6c. Column data types**: lists every column that isn't plain text, to prove numbers
-  and dates were stored with the right types. `information_schema.columns` is a built-in
-  table where Postgres describes all columns.
+- **6a. Rows in raw files vs rows loaded**: compares row counts before and after
+  cleaning. Matching numbers mean no rows were lost.
+- **6b. Rows with no score**: counts results that CMS reported as "Not Available".
+  `SUM(CASE WHEN score IS NULL THEN 1 ELSE 0 END)` adds 1 for each missing score.
+- **6c. Column data types**: lists every column that is not text, to show that numbers
+  and dates have the correct types. `information_schema.columns` is a built-in table
+  where PostgreSQL lists all columns.
 
 ### Step 7: Exploratory queries
 
@@ -252,90 +253,87 @@ INSERT INTO load_log (dataset_id, title, local_file, rows_loaded) VALUES
 \set ECHO none
 ```
 
-- `\ir exploration.sql`: run the file `exploration.sql` from the same folder.
-- `ECHO all`: print each query (with its title) above its result, so the output is easy
-  to read. `ECHO none` turns that back off.
+- `\ir exploration.sql`: runs `exploration.sql` from the same folder.
+- `ECHO all`: prints each query and its title above the result. `ECHO none` turns
+  this off again.
 
-At the very end it prints `BUILD COMPLETE`.
+The last line printed is `BUILD COMPLETE`.
 
 ---
 
 ## 2. exploration.sql
 
-13 questions we ask the data. It's plain SQL, so it also works in the Query Tool
-(highlight one query, press F5).
+13 queries about the data. The file contains only SQL, so it also works in the Query
+Tool: highlight one query and press F5.
 
-| # | Question | Key SQL used |
+| # | Question | SQL used |
 |---|---|---|
-| 1 | How many rows are in each table? | `COUNT(*)`, `UNION ALL` stacks the counts into one list |
-| 2 | How many measures are in each category? | `GROUP BY` groups rows, `COUNT` counts each group |
-| 3 | How many hospitals of each type and ownership, and their average rating? | `AVG`, `ROUND`, percent rated = rated / total × 100 |
-| 4 | How many hospitals got each star rating? | `GROUP BY overall_rating` |
-| 5 | What's the lowest, highest and average spending ratio? | `MIN`, `MAX`, `AVG` |
-| 6 | Do higher-rated hospitals spend more? | `JOIN` spending to hospitals, `GROUP BY` rating |
-| 7 | Do low, average and high spenders get different patient ratings? | `CASE` sorts hospitals into 3 spending levels |
-| 8 | Which ownership types have more "worse than national" death rates? | `LIKE 'Worse%'` finds text starting with "Worse" |
-| 9 | Average infection ratio for each infection type | `LIKE '%SIR'` finds measure IDs ending in SIR |
-| 10 | Spending and star rating by state | `LEFT JOIN`, `HAVING` keeps states with 10+ hospitals |
-| 11 | Top 10 states for heart failure readmissions | `ORDER BY ... DESC LIMIT 10` |
-| 12 | What date ranges does the data cover? | `UNION ALL` of all fact tables, `JOIN` to periods |
-| 13 | Spot check one hospital against medicare.gov | `WHERE facility_id = '010001'` |
+| 1 | How many rows are in each table? | `COUNT(*)`, `UNION ALL` to combine the counts |
+| 2 | How many measures are in each category? | `GROUP BY`, `COUNT` |
+| 3 | How many hospitals are there by type and ownership, and what is their average rating? | `AVG`, `ROUND`, percent rated = rated / total x 100 |
+| 4 | How many hospitals have each star rating? | `GROUP BY overall_rating` |
+| 5 | What are the lowest, highest and average spending ratios? | `MIN`, `MAX`, `AVG` |
+| 6 | Do hospitals with more stars spend more? | `JOIN` spending to hospitals, `GROUP BY` rating |
+| 7 | Do low, average and high spending hospitals get different patient ratings? | `CASE` to put hospitals into 3 spending levels |
+| 8 | Which ownership types have more death rates worse than the national rate? | `LIKE 'Worse%'` for text starting with "Worse" |
+| 9 | What is the average infection ratio for each infection type? | `LIKE '%SIR'` for measure IDs ending in SIR |
+| 10 | What are the spending and star rating by state? | `LEFT JOIN`, `HAVING` for states with 10 or more hospitals |
+| 11 | Which 10 states have the highest heart failure readmission rate? | `ORDER BY ... DESC LIMIT 10` |
+| 12 | Which date ranges does the data cover? | `UNION ALL` of all fact tables, `JOIN` to periods |
+| 13 | Do the values for one hospital match medicare.gov? | `WHERE facility_id = '010001'` |
 
-A few terms that show up:
-- **Spending ratio (MSPB)**: how much Medicare spends per patient at a hospital compared
-  to the national middle. 1.00 = average, 1.10 = 10% more, 0.90 = 10% less.
-- **SIR (infection ratio)**: 1.0 = as many infections as expected. Lower is better.
-- `HAVING` is like `WHERE`, but for groups (after `GROUP BY`).
-- `ROUND(x, 2)`: round to 2 decimal places.
+Terms in these queries:
+- **Spending ratio (MSPB)**: Medicare spending per patient at a hospital compared with
+  the national median. 1.00 is the median, 1.10 is 10% more and 0.90 is 10% less.
+- **SIR (infection ratio)**: 1.0 means as many infections as expected. Lower is better.
+- `HAVING`: a filter on groups, used after `GROUP BY`.
+- `ROUND(x, 2)`: rounds to 2 decimal places.
 
 ---
 
 ## 3. metabase_setup.py
 
-A Python script that clicks through Metabase's setup for us, using Metabase's API
-(a way for programs to talk to Metabase directly).
+A Python script that sets up Metabase through the Metabase API, which lets a program
+send commands to Metabase.
 
-What it does, in order:
+Steps:
 
-1. **Checks Metabase is running** at `http://localhost:3000`. If not, it tells you to run
-   `docker start metabase`.
-2. **Logs in** with your Metabase email and password (it asks you for them).
-3. **Adds the database connection**, the same as Admin settings > Databases > Add database,
-   with:
-   - host `host.docker.internal` (from inside Docker, this means "my laptop")
-   - port `5432` (the usual Postgres port)
-   - database `hospital_quality`, user `postgres`, and the password you type in
+1. Checks that Metabase is running at `http://localhost:3000`. If it is not, it asks
+   you to run `docker start metabase`.
+2. Logs in with your Metabase email and password.
+3. Adds the database connection, the same as Admin settings > Databases > Add database:
+   - host `host.docker.internal` (from inside Docker, this is the laptop itself)
+   - port `5432` (the default PostgreSQL port)
+   - database `hospital_quality`, user `postgres`, and the password you enter
 
-   If the connection already exists, it reuses it.
-4. **Syncs the tables** so Metabase knows about all 9 tables.
-5. **Makes a collection** (a folder) called "Group 6: Hospital Quality".
-6. **Creates 5 saved questions** (each is a SQL query):
-   CMS files loaded, table sizes, hospitals by star rating (bar chart),
-   spending by star rating (bar chart), and a sample of hospitals.
-   If a question already exists, it updates it instead of making a duplicate.
-7. **Creates a dashboard** with all 5 questions on one page.
-8. **Prints the links** to the dashboard and collection.
+   If the connection already exists, the script uses it.
+4. Syncs the tables so Metabase can see all 9 tables.
+5. Creates a collection (a folder) named "Group 6: Hospital Quality".
+6. Creates 5 saved questions, each based on a SQL query: CMS files loaded, table sizes,
+   hospitals by star rating (bar chart), spending by star rating (bar chart), and a
+   sample of hospitals. Questions that already exist are updated.
+7. Creates a dashboard with the 5 questions.
+8. Prints the links to the dashboard and the collection.
 
-Safe to run as many times as you want. Run it again after rebuilding the database.
+The script can be run again at any time. Run it again after rebuilding the database.
 
-The main parts of the code:
-- `QUESTIONS = [...]`: the list of the 5 questions: name, chart type, and SQL.
-- `class Metabase`: a small helper that sends requests to Metabase and shows a clear
-  message if something fails.
-- `main()`: the steps above, one after another.
-- `getpass`: asks for passwords without showing them on screen.
+Main parts of the code:
+- `QUESTIONS = [...]`: the 5 questions, each with a name, chart type and SQL query.
+- `class Metabase`: sends requests to Metabase and prints an error message if one fails.
+- `main()`: runs the steps above in order.
+- `getpass`: asks for passwords without showing them on the screen.
 
 ---
 
 ## 4. run.sh (optional)
 
-A shortcut to build the database from Terminal instead of pgAdmin.
+Runs the build from Terminal instead of pgAdmin.
 
-1. `cd "$(dirname "$0")"`: go to the folder the script is in.
-2. Looks for `psql` (the command-line version of the PSQL Tool). On Macs it's often not
-   set up to type directly, so it checks the usual install locations.
-3. If it can't find it, it tells you to use pgAdmin's PSQL Tool instead.
-4. Runs `create_and_load.sql` and saves all the output into `build_log.txt`
-   (`tee` shows it on screen and saves it at the same time).
+1. `cd "$(dirname "$0")"`: moves to the folder where the script is saved.
+2. Looks for `psql`, the Terminal version of the PSQL Tool. On a Mac it is often not
+   available by name, so the script checks the usual install folders.
+3. If `psql` is not found, it prints instructions for using the PSQL Tool in pgAdmin.
+4. Runs `create_and_load.sql` and saves the output in `build_log.txt`. `tee` shows the
+   output on the screen and saves it to the file at the same time.
 
 Run it with `./run.sh`. It asks for the postgres password.

@@ -130,7 +130,7 @@ def main():
 
     props = mb.call("GET", "/api/session/properties")
     if not props.get("has-user-setup", True):
-        raise SystemExit("Metabase's first-time setup isn't finished. Open "
+        raise SystemExit("Metabase's first-time setup is not finished. Open "
                          f"{MB_URL}, create your admin account, then run this again.")
 
     email = os.environ.get("MB_EMAIL") or input("Metabase email: ").strip()
