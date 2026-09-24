@@ -1,0 +1,5 @@
+# CMS data is downloaded by create_and_load.sql; some files are too big for GitHub
+*.csv
+*.json
+.DS_Store
+__pycache__/
