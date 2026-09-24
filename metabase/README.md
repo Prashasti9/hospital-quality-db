@@ -1,6 +1,7 @@
-# Script Guide
+# SQL Scripts Guide
 
-This file explains what each script in the repo does, step by step.
+This guide explains `create_and_load.sql` and `exploration.sql` step by step.
+The Metabase script is explained separately in `metabase/METABASE_EXPLAINED.md`.
 
 ## Terms used
 
@@ -15,22 +16,29 @@ This file explains what each script in the repo does, step by step.
 - **NULL**: no value. This is not the same as zero.
 - **pgAdmin**: the program we use to work with PostgreSQL.
 - **PSQL Tool**: a command window inside pgAdmin that can run a whole script file.
-- **Metabase**: the program we use to make charts and dashboards.
-- **Docker**: runs Metabase inside a container on our laptops.
+- **Query Tool**: the SQL editor in pgAdmin, used to run one query at a time.
 
-## Files in the repo
+## Files
 
 | File | Purpose |
 |---|---|
-| `create_and_load.sql` | Builds the database from the beginning |
-| `exploration.sql` | 13 exploratory queries (they also run at the end of the build) |
-| `metabase/metabase_setup.py` | Connects Metabase to the database and creates a dashboard |
-| `README.md` | Project overview and instructions |
-| `metabase/SCRIPTS_EXPLAINED.md` | This guide |
+| `create_and_load.sql` | Builds the database from the beginning, then runs `exploration.sql` |
+| `exploration.sql` | 13 exploratory queries |
+
+## Order of the build
+
+1. Create the `hospital_quality` database
+2. Create 6 temporary raw tables
+3. Download each CSV file from CMS into `/Users/Shared/hospital_quality_data/`,
+   then load it into its raw table
+4. Create and fill the 3 dimension tables
+5. Create and fill the 5 fact tables, plus `load_log`
+6. Run the load checks
+7. Run the exploratory queries
 
 ---
 
-## 1. create_and_load.sql
+## create_and_load.sql
 
 The script runs from top to bottom in 7 steps.
 
@@ -95,7 +103,8 @@ COPY raw_hospital_info FROM PROGRAM
     WITH (FORMAT csv, HEADER true);
 ```
 
-The text inside the quotes is a list of Mac Terminal commands. `&&` means "then, if the
+Each file is first downloaded and saved as a CSV file, and then loaded into its raw
+table. The text inside the quotes is a list of Mac Terminal commands. `&&` means "then, if the
 previous command worked":
 
 1. `mkdir -p /Users/Shared/hospital_quality_data`: creates the folder if it does not
@@ -261,7 +270,7 @@ The last line printed is `BUILD COMPLETE`.
 
 ---
 
-## 2. exploration.sql
+## exploration.sql
 
 13 queries about the data. The file contains only SQL, so it also works in the Query
 Tool: highlight one query and press F5.
@@ -288,42 +297,3 @@ Terms in these queries:
 - **SIR (infection ratio)**: 1.0 means as many infections as expected. Lower is better.
 - `HAVING`: a filter on groups, used after `GROUP BY`.
 - `ROUND(x, 2)`: rounds to 2 decimal places.
-
----
-
-## 3. metabase_setup.py
-
-A Python script that sets up Metabase through the Metabase REST API, using the
-`requests` library. It is a client for Metabase's API, the same idea as calling a
-FastAPI endpoint.
-
-API calls it makes, in order:
-
-| Step | Request | What it does |
-|---|---|---|
-| Check Metabase is up | `GET /api/health` | If Metabase is not running, it asks you to run `docker start metabase` |
-| Log in | `POST /api/session` | Sends your email and password and gets a session token |
-| Add the database | `POST /api/database` | Sends the Postgres connection details as JSON |
-| Sync tables | `POST /api/database/{id}/sync_schema` | Tells Metabase to read the tables |
-| Make a folder | `POST /api/collection` | Creates the "Group 6: Hospital Quality" collection |
-| Save questions | `POST /api/card` (or `PUT` to update) | Saves each SQL query as a question |
-| Make a dashboard | `POST /api/dashboard`, then `PUT /api/dashboard/{id}` | Creates the dashboard and places the 5 questions on it |
-
-After login, every request sends the token in the `X-Metabase-Session` header.
-
-The database connection uses:
-- host `host.docker.internal` (from inside Docker, this is the laptop itself)
-- port `5432` (the default PostgreSQL port)
-- database `hospital_quality`, user `postgres`, and the password you enter
-
-If the connection, questions or dashboard already exist, the script reuses or updates
-them instead of making copies. Run it again after rebuilding the database.
-
-Parts of the code:
-- `QUESTIONS`: the 5 questions, each with a name, chart type, size and SQL query.
-- `session = requests.Session()`: keeps the login token for all requests.
-- `api(method, path, body)`: sends one request and stops with an error message if it fails.
-- `log_in()`, `get_or_add_database()`, `sync_tables()`, `get_or_create_collection()`,
-  `save_questions()`, `create_dashboard()`: one function per step in the table above.
-- `main()`: calls the functions in order and prints the dashboard link.
-- `getpass`: asks for passwords without showing them on the screen.

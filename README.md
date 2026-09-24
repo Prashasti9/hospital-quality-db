@@ -62,55 +62,68 @@ erDiagram
   DIM_PERIOD |o--o{ FACT_SPENDING : period_id
 ```
 
-## How to run it
+## Setup
 
-You need PostgreSQL + pgAdmin, your postgres password, and internet (the script
-downloads the CSVs from CMS itself).
+### What you need
 
-1. Clone the repo:
+- PostgreSQL and pgAdmin (same setup as class), with the `postgres` login and password
+- Docker Desktop, for Metabase
+- Python 3 with the `requests` library (included with Anaconda)
+- Internet (the script downloads the data from CMS)
+
+### First time only
+
+1. Get the code:
    ```
    cd ~
    git clone https://github.com/Prashasti9/hospital-quality-db.git
    ```
-2. In pgAdmin, click your server and open the PSQL Tool (the `>_` button).
-3. Run the script (change the path to your own username):
+2. Set up Metabase in Docker. Open Docker Desktop, then in Terminal:
+   ```
+   docker run -d --name metabase -p 3000:3000 -v metabase-data:/metabase-data -e MB_DB_FILE=/metabase-data/metabase.db metabase/metabase:latest
+   ```
+   Wait about 2 minutes, open http://localhost:3000 and create your Metabase account.
+   You can skip the "add your data" step.
+
+If you already have a Metabase container, skip step 2.
+
+### Every time
+
+1. **Build the database.** In pgAdmin, click your server and open the PSQL Tool
+   (the `>_` button). Run (change `yourname` to your Mac username):
    ```
    \i '/Users/yourname/hospital-quality-db/create_and_load.sql'
    ```
-4. Wait a few minutes. When it prints `BUILD COMPLETE`, refresh Databases in pgAdmin
-   to see `hospital_quality`.
+   Wait a few minutes until it prints `BUILD COMPLETE`, then refresh Databases in pgAdmin.
+2. **Start Metabase** (Docker Desktop must be open):
+   ```
+   docker start metabase
+   ```
+3. **Connect Metabase:**
+   ```
+   cd ~/hospital-quality-db
+   python3 metabase/metabase_setup.py
+   ```
+   Enter your Metabase login and Postgres password, then open the dashboard link it prints.
 
-The script also runs `exploration.sql` at the end, so the exploratory query results
-appear in the same window. You can also open `exploration.sql` in the Query Tool on
-`hospital_quality` and run one query at a time (highlight it and press F5).
+The build script downloads each CSV file into `/Users/Shared/hospital_quality_data/`
+and then loads it. It also runs `exploration.sql` at the end, so the exploratory query
+results appear in the same window. To run one query at a time, open `exploration.sql`
+in the Query Tool on `hospital_quality`, highlight a query and press F5.
 
 The script drops and recreates the database every time, so it can be run again.
-The CSV files are saved in `/Users/Shared/hospital_quality_data/`.
 
 We run it in the PSQL Tool instead of the Query Tool because the script creates the
 database and then connects to it, and the Query Tool cannot switch databases in the
 middle of a script.
 
-## Metabase
-
-Metabase runs in Docker. After starting it (`docker start metabase`) and creating your
-Metabase account, connect it with:
-
-```
-python3 metabase/metabase_setup.py
-```
-
-The script uses the `requests` library (included with Anaconda; otherwise run
-`pip3 install requests`).
-
-It asks for your Metabase login and postgres password, adds the database connection,
-and creates 5 questions and a dashboard in a "Group 6: Hospital Quality"
-collection. You can also add the connection by hand in Admin settings > Databases
-(host `host.docker.internal`, port 5432, database `hospital_quality`).
+Metabase can also be connected by hand: Admin settings > Databases > Add database >
+PostgreSQL, with host `host.docker.internal`, port 5432, database `hospital_quality`.
 
 ## How the script works
 
-A step-by-step explanation of every script is in `metabase/SCRIPTS_EXPLAINED.md`.
+Step-by-step explanations are in `SQL_EXPLAINED.md` (SQL scripts) and
+`metabase/METABASE_EXPLAINED.md` (Metabase setup and script).
 
 1. Creates the `hospital_quality` database
 2. Makes temporary raw tables (all TEXT) that match the CSV columns
