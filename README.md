@@ -97,7 +97,7 @@ Metabase runs in Docker. After starting it (`docker start metabase`) and creatin
 Metabase account, connect it with:
 
 ```
-python3 metabase_setup.py
+python3 extras/metabase_setup.py
 ```
 
 It asks for your Metabase login and postgres password, adds the database connection,
@@ -107,7 +107,7 @@ collection. You can also add the connection by hand in Admin settings > Database
 
 ## How the script works
 
-A step-by-step explanation of every script is in `SCRIPTS_EXPLAINED.md`.
+A step-by-step explanation of every script is in `extras/SCRIPTS_EXPLAINED.md`.
 
 1. Creates the `hospital_quality` database
 2. Makes temporary raw tables (all TEXT) that match the CSV columns

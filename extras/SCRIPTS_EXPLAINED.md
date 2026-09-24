@@ -24,8 +24,9 @@ This file explains what each script in the repo does, step by step.
 |---|---|
 | `create_and_load.sql` | Builds the database from the beginning |
 | `exploration.sql` | 13 exploratory queries (they also run at the end of the build) |
-| `metabase_setup.py` | Connects Metabase to the database and creates a dashboard |
+| `extras/metabase_setup.py` | Connects Metabase to the database and creates a dashboard |
 | `README.md` | Project overview and instructions |
+| `extras/SCRIPTS_EXPLAINED.md` | This guide |
 
 ---
 
