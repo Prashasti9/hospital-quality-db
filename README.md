@@ -4,7 +4,7 @@ Group project for DSAI-691 Relational Databases at USF.
 
 Team: Davey Grimes, Seth Prisament, Prashasti Srivastava, Eric Smith, Brendan Waterval
 
-## What we're looking at
+## What we are looking at
 
 Our question is whether hospitals that spend more per Medicare patient actually give
 better care. We used public hospital data from CMS (Centers for Medicare & Medicaid
