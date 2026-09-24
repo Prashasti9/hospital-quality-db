@@ -81,6 +81,10 @@ downloads the CSVs from CMS itself).
 4. Wait a few minutes. When it prints `BUILD COMPLETE`, refresh Databases in pgAdmin
    and you'll see `hospital_quality`.
 
+The script also runs `exploration.sql` at the end, so the exploratory query results
+show up in the same window. You can also open `exploration.sql` in the Query Tool on
+`hospital_quality` and run one query at a time (highlight it and press F5).
+
 The script drops and recreates the database every time, so it's safe to run again.
 The CSV files get saved to `/Users/Shared/hospital_quality_data/`.
 
@@ -110,7 +114,9 @@ collection. You can also add the connection by hand in Admin settings > Database
 4. Creates the dimension and fact tables with primary and foreign keys
 5. Uses INSERT INTO ... SELECT to clean the raw data and fill the final tables
    (text like "Not Available" becomes NULL, numbers and dates get proper types)
-6. Runs some checks (raw rows vs loaded rows, data types) and exploratory queries
+6. Runs some checks (raw rows vs loaded rows, data types)
+7. Runs the exploratory queries in `exploration.sql` (13 queries, like star rating by
+   ownership, spending vs star rating, and readmissions by state)
 
 ## Things we noticed
 
