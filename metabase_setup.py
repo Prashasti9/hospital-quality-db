@@ -33,7 +33,7 @@ QUESTIONS = [
     {
         "name": "1. CMS files loaded (row counts)",
         "display": "table",
-        "sql": """SELECT dataset_id, title, cms_released, rows_loaded, loaded_at
+        "sql": """SELECT dataset_id, title, rows_loaded, loaded_at
 FROM load_log
 ORDER BY dataset_id""",
         "viz": {},
@@ -182,7 +182,13 @@ def main():
     for q in QUESTIONS:
         if q["name"] in existing:
             card_id = existing[q["name"]]
-            print(f"Question exists: {q['name']}")
+            mb.call("PUT", f"/api/card/{card_id}", {
+                "display": q["display"],
+                "visualization_settings": q["viz"],
+                "dataset_query": {"type": "native", "database": db_id,
+                                  "native": {"query": q["sql"]}},
+            })
+            print(f"Updated question: {q['name']}")
         else:
             card_id = mb.call("POST", "/api/card", {
                 "name": q["name"],

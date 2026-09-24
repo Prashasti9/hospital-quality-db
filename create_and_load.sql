@@ -2,8 +2,8 @@
 -- DSAI-691 Group 6: U.S. Hospital Quality & Cost
 --
 -- Creates the hospital_quality database, downloads 6 CMS hospital files,
--- builds a star schema (3 dimension tables + 5 fact tables), loads the data
--- and runs checks and exploratory queries.
+-- loads them into temporary raw tables, then copies them into a star schema
+-- (3 dimension tables + 5 fact tables) with primary and foreign keys.
 --
 -- How to run (pgAdmin): right-click the server > PSQL Tool, then type
 --   \i '/Users/<your-name>/hospital-quality-db/create_and_load.sql'
@@ -14,55 +14,22 @@
 \pset footer off
 \pset pager off
 
--- 0. Create database
-\echo '=== 0. Create database ==='
+
+-- 1. Create database
+\echo '=== 1. Create database ==='
 \c postgres
 DROP DATABASE IF EXISTS hospital_quality WITH (FORCE);
 CREATE DATABASE hospital_quality;
 \c hospital_quality
 
--- 1. Helper functions
-\echo '=== 1. Helper functions ==='
-CREATE FUNCTION to_num(v TEXT) RETURNS NUMERIC
-LANGUAGE sql IMMUTABLE AS $$
-    SELECT CASE WHEN replace(trim(v), ',', '') ~ '^-?[0-9]*\.?[0-9]+$'
-                THEN replace(trim(v), ',', '')::NUMERIC END
-$$;
+-- CMS dates are written as MM/DD/YYYY
+SET datestyle = 'ISO, MDY';
 
-CREATE FUNCTION to_int(v TEXT) RETURNS INTEGER
-LANGUAGE sql IMMUTABLE AS $$
-    SELECT CASE WHEN replace(trim(v), ',', '') ~ '^-?[0-9]+$'
-                THEN replace(trim(v), ',', '')::INTEGER END
-$$;
 
-CREATE FUNCTION to_dt(v TEXT) RETURNS DATE
-LANGUAGE sql IMMUTABLE AS $$
-    SELECT CASE WHEN trim(v) ~ '^[0-9]{1,2}/[0-9]{1,2}/[0-9]{4}$'
-                THEN to_date(trim(v), 'MM/DD/YYYY') END
-$$;
+-- 2. Raw tables: temporary, every column TEXT, same columns as the CSV files
+\echo '=== 2. Raw tables ==='
 
-CREATE FUNCTION to_bool(v TEXT) RETURNS BOOLEAN
-LANGUAGE sql IMMUTABLE AS $$
-    SELECT CASE upper(trim(v)) WHEN 'YES' THEN TRUE WHEN 'Y' THEN TRUE
-                               WHEN 'NO'  THEN FALSE WHEN 'N' THEN FALSE END
-$$;
-
-CREATE FUNCTION to_fid(v TEXT) RETURNS TEXT
-LANGUAGE sql IMMUTABLE AS $$
-    SELECT CASE WHEN trim(v) = '' THEN NULL ELSE lpad(trim(v), 6, '0') END
-$$;
-
-CREATE FUNCTION to_txt(v TEXT) RETURNS TEXT
-LANGUAGE sql IMMUTABLE AS $$
-    SELECT CASE WHEN trim(v) IN ('', 'Not Available', 'Not Applicable', 'N/A') THEN NULL
-                ELSE trim(v) END
-$$;
-
--- 2. Staging tables
-\echo '=== 2. Staging tables ==='
-CREATE SCHEMA staging;
-
-CREATE TABLE staging.hospital_general_information (
+CREATE TEMP TABLE raw_hospital_info (
     facility_id TEXT, facility_name TEXT, address TEXT, city_town TEXT, state TEXT,
     zip_code TEXT, county_parish TEXT, telephone_number TEXT,
     hospital_type TEXT, hospital_ownership TEXT, emergency_services TEXT,
@@ -82,7 +49,7 @@ CREATE TABLE staging.hospital_general_information (
     te_group_measure_count TEXT, count_facility_te_measures TEXT, te_group_footnote TEXT
 );
 
-CREATE TABLE staging.complications_deaths (
+CREATE TEMP TABLE raw_complications (
     facility_id TEXT, facility_name TEXT, address TEXT, city_town TEXT, state TEXT,
     zip_code TEXT, county_parish TEXT, telephone_number TEXT,
     measure_id TEXT, measure_name TEXT, compared_to_national TEXT, denominator TEXT,
@@ -90,14 +57,14 @@ CREATE TABLE staging.complications_deaths (
     start_date TEXT, end_date TEXT
 );
 
-CREATE TABLE staging.infections (
+CREATE TEMP TABLE raw_infections (
     facility_id TEXT, facility_name TEXT, address TEXT, city_town TEXT, state TEXT,
     zip_code TEXT, county_parish TEXT, telephone_number TEXT,
     measure_id TEXT, measure_name TEXT, compared_to_national TEXT, score TEXT,
     footnote TEXT, start_date TEXT, end_date TEXT
 );
 
-CREATE TABLE staging.unplanned_visits (
+CREATE TEMP TABLE raw_unplanned_visits (
     facility_id TEXT, facility_name TEXT, address TEXT, city_town TEXT, state TEXT,
     zip_code TEXT, county_parish TEXT, telephone_number TEXT,
     measure_id TEXT, measure_name TEXT, compared_to_national TEXT, denominator TEXT,
@@ -106,7 +73,7 @@ CREATE TABLE staging.unplanned_visits (
     start_date TEXT, end_date TEXT
 );
 
-CREATE TABLE staging.patient_survey (
+CREATE TEMP TABLE raw_patient_survey (
     facility_id TEXT, facility_name TEXT, address TEXT, city_town TEXT, state TEXT,
     zip_code TEXT, county_parish TEXT, telephone_number TEXT,
     hcahps_measure_id TEXT, hcahps_question TEXT, hcahps_answer_description TEXT,
@@ -118,106 +85,47 @@ CREATE TABLE staging.patient_survey (
     start_date TEXT, end_date TEXT
 );
 
-CREATE TABLE staging.spending (
+CREATE TEMP TABLE raw_spending (
     facility_id TEXT, facility_name TEXT, address TEXT, city_town TEXT, state TEXT,
     zip_code TEXT, county_parish TEXT, telephone_number TEXT,
     measure_id TEXT, measure_name TEXT, score TEXT, footnote TEXT,
     start_date TEXT, end_date TEXT
 );
 
--- 3. Download and load CMS files
+
+-- 3. Download each file from CMS, save it in /Users/Shared/hospital_quality_data,
+--    and load it into its raw table
 \echo '=== 3. Download and load CMS files ==='
--- folder where the CSV files are saved
-SET cms.data_dir    = '/Users/Shared/hospital_quality_data';
-SET cms.catalog_url = 'https://data.cms.gov/provider-data/api/1/metastore/schemas/dataset/items';
 
-CREATE TABLE staging.cms_datasets (
-    dataset_id     TEXT PRIMARY KEY,
-    staging_table  TEXT NOT NULL,
-    file_name      TEXT NOT NULL,
-    expected_cols  INTEGER NOT NULL
-);
-INSERT INTO staging.cms_datasets VALUES
-    ('xubh-q36u', 'staging.hospital_general_information', 'Hospital_General_Information.csv',                    38),
-    ('ynj2-r877', 'staging.complications_deaths',         'Complications_and_Deaths-Hospital.csv',               18),
-    ('77hc-ibv8', 'staging.infections',                   'Healthcare_Associated_Infections-Hospital.csv',       15),
-    ('632h-zaca', 'staging.unplanned_visits',             'Unplanned_Hospital_Visits-Hospital.csv',              20),
-    ('dgck-syfz', 'staging.patient_survey',               'HCAHPS-Hospital.csv',                                 22),
-    ('rrqw-56er', 'staging.spending',                     'Medicare_Hospital_Spending_Per_Patient-Hospital.csv', 14);
+COPY raw_hospital_info FROM PROGRAM
+    'mkdir -p /Users/Shared/hospital_quality_data && cd /Users/Shared/hospital_quality_data && curl -sSfL -o Hospital_General_Information.csv "https://data.cms.gov/provider-data/api/1/datastore/query/xubh-q36u/0/download?format=csv" && cat Hospital_General_Information.csv'
+    WITH (FORMAT csv, HEADER true);
 
-CREATE TABLE staging.program_output (line TEXT);
+COPY raw_complications FROM PROGRAM
+    'cd /Users/Shared/hospital_quality_data && curl -sSfL -o Complications_and_Deaths-Hospital.csv "https://data.cms.gov/provider-data/api/1/datastore/query/ynj2-r877/0/download?format=csv" && cat Complications_and_Deaths-Hospital.csv'
+    WITH (FORMAT csv, HEADER true);
 
-CREATE TABLE load_log (
-    dataset_id    TEXT PRIMARY KEY,
-    title         TEXT,
-    cms_released  DATE,
-    download_url  TEXT,
-    local_file    TEXT,
-    rows_loaded   INTEGER,
-    loaded_at     TIMESTAMP DEFAULT now()
-);
+COPY raw_infections FROM PROGRAM
+    'cd /Users/Shared/hospital_quality_data && curl -sSfL -o Healthcare_Associated_Infections-Hospital.csv "https://data.cms.gov/provider-data/api/1/datastore/query/77hc-ibv8/0/download?format=csv" && cat Healthcare_Associated_Infections-Hospital.csv'
+    WITH (FORMAT csv, HEADER true);
 
-DO $$
-DECLARE
-    dir        TEXT    := rtrim(current_setting('cms.data_dir'), '/');
-    cat_url    TEXT    := current_setting('cms.catalog_url');
-    raw_opts   TEXT    := $o$WITH (FORMAT csv, DELIMITER E'\x02', QUOTE E'\x01')$o$;
-    catalog    JSONB;
-    d          RECORD;
-    local_path TEXT;
-    head_bytes BYTEA;
-    header     TEXT;
-    n_cols     INTEGER;
-    n_rows     INTEGER;
-BEGIN
-    RAISE NOTICE 'Download folder: %', dir;
+COPY raw_unplanned_visits FROM PROGRAM
+    'cd /Users/Shared/hospital_quality_data && curl -sSfL -o Unplanned_Hospital_Visits-Hospital.csv "https://data.cms.gov/provider-data/api/1/datastore/query/632h-zaca/0/download?format=csv" && cat Unplanned_Hospital_Visits-Hospital.csv'
+    WITH (FORMAT csv, HEADER true);
 
-    EXECUTE format('COPY staging.program_output FROM PROGRAM %L ' || raw_opts,
-                   format('mkdir -p %L && curl -sSfL %L -o %L',
-                          dir, cat_url, dir || '/cms_catalog.json'));
-    catalog := pg_read_file(dir || '/cms_catalog.json')::jsonb;
+COPY raw_patient_survey FROM PROGRAM
+    'cd /Users/Shared/hospital_quality_data && curl -sSfL -o HCAHPS-Hospital.csv "https://data.cms.gov/provider-data/api/1/datastore/query/dgck-syfz/0/download?format=csv" && cat HCAHPS-Hospital.csv'
+    WITH (FORMAT csv, HEADER true);
 
-    FOR d IN
-        SELECT ds.*, item->>'title' AS title, item->>'released' AS released,
-               item->'distribution'->0->>'downloadURL' AS url
-        FROM staging.cms_datasets ds
-        LEFT JOIN jsonb_array_elements(catalog) AS item
-               ON item->>'identifier' = ds.dataset_id
-        ORDER BY ds.dataset_id
-    LOOP
-        IF d.url IS NULL THEN
-            RAISE EXCEPTION 'Dataset % (%) was not found in the CMS catalog', d.dataset_id, d.file_name;
-        END IF;
-        local_path := dir || '/' || d.file_name;
-        RAISE NOTICE 'Downloading % (released %)', d.title, d.released;
+COPY raw_spending FROM PROGRAM
+    'cd /Users/Shared/hospital_quality_data && curl -sSfL -o Medicare_Hospital_Spending_Per_Patient-Hospital.csv "https://data.cms.gov/provider-data/api/1/datastore/query/rrqw-56er/0/download?format=csv" && cat Medicare_Hospital_Spending_Per_Patient-Hospital.csv'
+    WITH (FORMAT csv, HEADER true);
 
-        EXECUTE format('COPY staging.program_output FROM PROGRAM %L ' || raw_opts,
-                       format('curl -sSfL %L -o %L', d.url, local_path));
-
-        head_bytes := pg_read_binary_file(local_path, 0, 8192);
-        header := convert_from(substring(head_bytes FROM 1 FOR position('\x0a'::bytea IN head_bytes) - 1), 'UTF8');
-        header := replace(replace(header, E'\uFEFF', ''), E'\r', '');
-        n_cols := array_length(string_to_array(header, ','), 1);
-        IF n_cols IS DISTINCT FROM d.expected_cols THEN
-            RAISE EXCEPTION '% has % columns but % were expected. CMS changed the layout; update % in section 2.',
-                            d.file_name, n_cols, d.expected_cols, d.staging_table;
-        END IF;
-
-        EXECUTE format('COPY %s FROM %L WITH (FORMAT csv, HEADER true, ENCODING ''UTF8'')',
-                       d.staging_table, local_path);
-        EXECUTE format('SELECT COUNT(*) FROM %s', d.staging_table) INTO n_rows;
-
-        INSERT INTO load_log (dataset_id, title, cms_released, download_url, local_file, rows_loaded)
-        VALUES (d.dataset_id, d.title, NULLIF(d.released, '')::DATE, d.url, local_path, n_rows);
-        RAISE NOTICE '  saved % and loaded % rows into %', local_path, n_rows, d.staging_table;
-    END LOOP;
-END $$;
-
-SELECT dataset_id, title, cms_released, rows_loaded, local_file FROM load_log ORDER BY dataset_id;
 
 -- 4. Dimension tables
 \echo '=== 4. Dimension tables ==='
 
+-- facility_id and zip_code stay TEXT because they have leading zeros ('010001')
 CREATE TABLE dim_hospital (
     facility_id        TEXT     PRIMARY KEY,
     facility_name      TEXT     NOT NULL,
@@ -238,69 +146,67 @@ CREATE TABLE dim_measure (
     measure_id      TEXT PRIMARY KEY,
     measure_name    TEXT NOT NULL,
     measure_detail  TEXT,
-    measure_domain  TEXT NOT NULL CHECK (measure_domain IN
-                    ('Complications & Deaths', 'Infections', 'Unplanned Visits',
-                     'Patient Experience', 'Spending'))
+    measure_domain  TEXT NOT NULL
 );
 
 CREATE TABLE dim_period (
     period_id   SERIAL PRIMARY KEY,
     start_date  DATE NOT NULL,
     end_date    DATE NOT NULL,
-    UNIQUE (start_date, end_date),
-    CHECK (end_date >= start_date)
+    UNIQUE (start_date, end_date)
 );
 
+-- Some files drop the leading zero from facility_id, so LPAD adds it back
 INSERT INTO dim_hospital
-SELECT DISTINCT ON (to_fid(facility_id))
-       to_fid(facility_id), trim(facility_name), to_txt(address), to_txt(city_town),
-       upper(trim(state)), to_txt(zip_code), to_txt(county_parish), to_txt(telephone_number),
-       to_txt(hospital_type), to_txt(hospital_ownership),
-       to_bool(emergency_services), COALESCE(upper(trim(meets_birthing_friendly)) = 'Y', FALSE),
-       to_int(hospital_overall_rating)
-FROM staging.hospital_general_information
-WHERE to_fid(facility_id) IS NOT NULL
-ORDER BY to_fid(facility_id);
+SELECT LPAD(facility_id, 6, '0'),
+       facility_name,
+       NULLIF(address, ''),
+       NULLIF(city_town, ''),
+       state,
+       NULLIF(zip_code, ''),
+       NULLIF(county_parish, ''),
+       NULLIF(telephone_number, ''),
+       hospital_type,
+       hospital_ownership,
+       CASE emergency_services WHEN 'Yes' THEN TRUE WHEN 'No' THEN FALSE END,
+       COALESCE(meets_birthing_friendly = 'Y', FALSE),
+       CASE WHEN hospital_overall_rating IN ('1', '2', '3', '4', '5')
+            THEN hospital_overall_rating::SMALLINT END
+FROM raw_hospital_info;
 
 INSERT INTO dim_measure (measure_id, measure_name, measure_detail, measure_domain)
-SELECT DISTINCT ON (measure_id) measure_id, measure_name, measure_detail, measure_domain
-FROM (
-    SELECT trim(measure_id) AS measure_id, trim(measure_name) AS measure_name,
-           NULL AS measure_detail, 'Complications & Deaths' AS measure_domain
-    FROM staging.complications_deaths
-    UNION ALL
-    SELECT trim(measure_id), trim(measure_name), NULL, 'Infections'
-    FROM staging.infections
-    UNION ALL
-    SELECT trim(measure_id), trim(measure_name), NULL, 'Unplanned Visits'
-    FROM staging.unplanned_visits
-    UNION ALL
-    SELECT trim(hcahps_measure_id), trim(hcahps_question),
-           to_txt(hcahps_answer_description), 'Patient Experience'
-    FROM staging.patient_survey
-    UNION ALL
-    SELECT trim(measure_id), trim(measure_name), NULL, 'Spending'
-    FROM staging.spending
-) m
-WHERE to_txt(measure_id) IS NOT NULL
-ORDER BY measure_id;
+SELECT measure_id, MIN(measure_name), NULL, 'Complications & Deaths'
+FROM raw_complications GROUP BY measure_id
+UNION ALL
+SELECT measure_id, MIN(measure_name), NULL, 'Infections'
+FROM raw_infections GROUP BY measure_id
+UNION ALL
+SELECT measure_id, MIN(measure_name), NULL, 'Unplanned Visits'
+FROM raw_unplanned_visits GROUP BY measure_id
+UNION ALL
+SELECT hcahps_measure_id, MIN(hcahps_question), MIN(hcahps_answer_description), 'Patient Experience'
+FROM raw_patient_survey GROUP BY hcahps_measure_id
+UNION ALL
+SELECT measure_id, MIN(measure_name), NULL, 'Spending'
+FROM raw_spending GROUP BY measure_id;
 
 INSERT INTO dim_period (start_date, end_date)
-SELECT DISTINCT to_dt(start_date), to_dt(end_date)
-FROM (
-    SELECT start_date, end_date FROM staging.complications_deaths
-    UNION SELECT start_date, end_date FROM staging.infections
-    UNION SELECT start_date, end_date FROM staging.unplanned_visits
-    UNION SELECT start_date, end_date FROM staging.patient_survey
-    UNION SELECT start_date, end_date FROM staging.spending
-) p
-WHERE to_dt(start_date) IS NOT NULL AND to_dt(end_date) IS NOT NULL
-ORDER BY 1, 2;
+SELECT start_date::DATE, end_date::DATE FROM raw_complications    WHERE start_date <> '' AND end_date <> ''
+UNION
+SELECT start_date::DATE, end_date::DATE FROM raw_infections       WHERE start_date <> '' AND end_date <> ''
+UNION
+SELECT start_date::DATE, end_date::DATE FROM raw_unplanned_visits WHERE start_date <> '' AND end_date <> ''
+UNION
+SELECT start_date::DATE, end_date::DATE FROM raw_patient_survey   WHERE start_date <> '' AND end_date <> ''
+UNION
+SELECT start_date::DATE, end_date::DATE FROM raw_spending         WHERE start_date <> '' AND end_date <> '';
 
--- 5. Fact tables
+
+-- 5. Fact tables: one row per hospital per measure
+--    Values like 'Not Available' become NULL.
+--    score ~ '^-?[0-9.]+$' means "score looks like a number".
 \echo '=== 5. Fact tables ==='
 
--- one row per hospital per measure
 CREATE TABLE fact_complications_deaths (
     facility_id          TEXT    NOT NULL REFERENCES dim_hospital (facility_id),
     measure_id           TEXT    NOT NULL REFERENCES dim_measure (measure_id),
@@ -360,97 +266,151 @@ CREATE TABLE fact_spending (
     PRIMARY KEY (facility_id, measure_id)
 );
 
+-- JOIN dim_hospital keeps only hospitals that exist, so the foreign keys always hold
 INSERT INTO fact_complications_deaths
-SELECT to_fid(s.facility_id), trim(s.measure_id), p.period_id,
-       to_txt(s.compared_to_national), to_num(s.denominator), to_num(s.score),
-       to_num(s.lower_estimate), to_num(s.higher_estimate), to_txt(s.footnote)
-FROM staging.complications_deaths s
-JOIN dim_hospital h ON h.facility_id = to_fid(s.facility_id)
-LEFT JOIN dim_period p ON p.start_date = to_dt(s.start_date) AND p.end_date = to_dt(s.end_date);
+SELECT h.facility_id, r.measure_id, p.period_id,
+       NULLIF(NULLIF(r.compared_to_national, 'Not Available'), ''),
+       CASE WHEN r.denominator     ~ '^-?[0-9.]+$' THEN r.denominator::NUMERIC END,
+       CASE WHEN r.score           ~ '^-?[0-9.]+$' THEN r.score::NUMERIC END,
+       CASE WHEN r.lower_estimate  ~ '^-?[0-9.]+$' THEN r.lower_estimate::NUMERIC END,
+       CASE WHEN r.higher_estimate ~ '^-?[0-9.]+$' THEN r.higher_estimate::NUMERIC END,
+       NULLIF(r.footnote, '')
+FROM raw_complications r
+JOIN dim_hospital h ON h.facility_id = LPAD(r.facility_id, 6, '0')
+LEFT JOIN dim_period p ON p.start_date = NULLIF(r.start_date, '')::DATE
+                      AND p.end_date   = NULLIF(r.end_date, '')::DATE;
 
 INSERT INTO fact_infections
-SELECT to_fid(s.facility_id), trim(s.measure_id), p.period_id,
-       to_txt(s.compared_to_national), to_num(s.score), to_txt(s.footnote)
-FROM staging.infections s
-JOIN dim_hospital h ON h.facility_id = to_fid(s.facility_id)
-LEFT JOIN dim_period p ON p.start_date = to_dt(s.start_date) AND p.end_date = to_dt(s.end_date);
+SELECT h.facility_id, r.measure_id, p.period_id,
+       NULLIF(NULLIF(r.compared_to_national, 'Not Available'), ''),
+       CASE WHEN r.score ~ '^-?[0-9.]+$' THEN r.score::NUMERIC END,
+       NULLIF(r.footnote, '')
+FROM raw_infections r
+JOIN dim_hospital h ON h.facility_id = LPAD(r.facility_id, 6, '0')
+LEFT JOIN dim_period p ON p.start_date = NULLIF(r.start_date, '')::DATE
+                      AND p.end_date   = NULLIF(r.end_date, '')::DATE;
 
 INSERT INTO fact_unplanned_visits
-SELECT to_fid(s.facility_id), trim(s.measure_id), p.period_id,
-       to_txt(s.compared_to_national), to_num(s.denominator), to_num(s.score),
-       to_num(s.lower_estimate), to_num(s.higher_estimate),
-       to_int(s.number_of_patients), to_int(s.number_of_patients_returned),
-       to_txt(s.footnote)
-FROM staging.unplanned_visits s
-JOIN dim_hospital h ON h.facility_id = to_fid(s.facility_id)
-LEFT JOIN dim_period p ON p.start_date = to_dt(s.start_date) AND p.end_date = to_dt(s.end_date);
+SELECT h.facility_id, r.measure_id, p.period_id,
+       NULLIF(NULLIF(r.compared_to_national, 'Not Available'), ''),
+       CASE WHEN r.denominator     ~ '^-?[0-9.]+$' THEN r.denominator::NUMERIC END,
+       CASE WHEN r.score           ~ '^-?[0-9.]+$' THEN r.score::NUMERIC END,
+       CASE WHEN r.lower_estimate  ~ '^-?[0-9.]+$' THEN r.lower_estimate::NUMERIC END,
+       CASE WHEN r.higher_estimate ~ '^-?[0-9.]+$' THEN r.higher_estimate::NUMERIC END,
+       CASE WHEN REPLACE(r.number_of_patients, ',', '') ~ '^[0-9]+$'
+            THEN REPLACE(r.number_of_patients, ',', '')::INTEGER END,
+       CASE WHEN REPLACE(r.number_of_patients_returned, ',', '') ~ '^[0-9]+$'
+            THEN REPLACE(r.number_of_patients_returned, ',', '')::INTEGER END,
+       NULLIF(r.footnote, '')
+FROM raw_unplanned_visits r
+JOIN dim_hospital h ON h.facility_id = LPAD(r.facility_id, 6, '0')
+LEFT JOIN dim_period p ON p.start_date = NULLIF(r.start_date, '')::DATE
+                      AND p.end_date   = NULLIF(r.end_date, '')::DATE;
 
 INSERT INTO fact_patient_survey
-SELECT to_fid(s.facility_id), trim(s.hcahps_measure_id), p.period_id,
-       to_int(s.patient_survey_star_rating), to_num(s.hcahps_answer_percent),
-       to_num(s.hcahps_linear_mean_value), to_int(s.number_of_completed_surveys),
-       to_num(s.survey_response_rate_percent)
-FROM staging.patient_survey s
-JOIN dim_hospital h ON h.facility_id = to_fid(s.facility_id)
-LEFT JOIN dim_period p ON p.start_date = to_dt(s.start_date) AND p.end_date = to_dt(s.end_date);
+SELECT h.facility_id, r.hcahps_measure_id, p.period_id,
+       CASE WHEN r.patient_survey_star_rating IN ('1', '2', '3', '4', '5')
+            THEN r.patient_survey_star_rating::SMALLINT END,
+       CASE WHEN r.hcahps_answer_percent    ~ '^-?[0-9.]+$' THEN r.hcahps_answer_percent::NUMERIC END,
+       CASE WHEN r.hcahps_linear_mean_value ~ '^-?[0-9.]+$' THEN r.hcahps_linear_mean_value::NUMERIC END,
+       CASE WHEN REPLACE(r.number_of_completed_surveys, ',', '') ~ '^[0-9]+$'
+            THEN REPLACE(r.number_of_completed_surveys, ',', '')::INTEGER END,
+       CASE WHEN r.survey_response_rate_percent ~ '^-?[0-9.]+$' THEN r.survey_response_rate_percent::NUMERIC END
+FROM raw_patient_survey r
+JOIN dim_hospital h ON h.facility_id = LPAD(r.facility_id, 6, '0')
+LEFT JOIN dim_period p ON p.start_date = NULLIF(r.start_date, '')::DATE
+                      AND p.end_date   = NULLIF(r.end_date, '')::DATE;
 
 INSERT INTO fact_spending
-SELECT to_fid(s.facility_id), trim(s.measure_id), p.period_id,
-       to_num(s.score), to_txt(s.footnote)
-FROM staging.spending s
-JOIN dim_hospital h ON h.facility_id = to_fid(s.facility_id)
-LEFT JOIN dim_period p ON p.start_date = to_dt(s.start_date) AND p.end_date = to_dt(s.end_date);
+SELECT h.facility_id, r.measure_id, p.period_id,
+       CASE WHEN r.score ~ '^-?[0-9.]+$' THEN r.score::NUMERIC END,
+       NULLIF(r.footnote, '')
+FROM raw_spending r
+JOIN dim_hospital h ON h.facility_id = LPAD(r.facility_id, 6, '0')
+LEFT JOIN dim_period p ON p.start_date = NULLIF(r.start_date, '')::DATE
+                      AND p.end_date   = NULLIF(r.end_date, '')::DATE;
 
-CREATE INDEX ON dim_hospital (state);
-CREATE INDEX ON dim_hospital (hospital_ownership);
-CREATE INDEX ON fact_complications_deaths (measure_id);
-CREATE INDEX ON fact_infections (measure_id);
-CREATE INDEX ON fact_unplanned_visits (measure_id);
-CREATE INDEX ON fact_patient_survey (measure_id);
+-- Record of what was loaded
+CREATE TABLE load_log (
+    dataset_id   TEXT PRIMARY KEY,
+    title        TEXT,
+    local_file   TEXT,
+    rows_loaded  INTEGER,
+    loaded_at    TIMESTAMP DEFAULT now()
+);
+
+INSERT INTO load_log (dataset_id, title, local_file, rows_loaded) VALUES
+('xubh-q36u', 'Hospital General Information',
+ '/Users/Shared/hospital_quality_data/Hospital_General_Information.csv',
+ (SELECT COUNT(*) FROM raw_hospital_info)),
+('ynj2-r877', 'Complications and Deaths - Hospital',
+ '/Users/Shared/hospital_quality_data/Complications_and_Deaths-Hospital.csv',
+ (SELECT COUNT(*) FROM raw_complications)),
+('77hc-ibv8', 'Healthcare Associated Infections - Hospital',
+ '/Users/Shared/hospital_quality_data/Healthcare_Associated_Infections-Hospital.csv',
+ (SELECT COUNT(*) FROM raw_infections)),
+('632h-zaca', 'Unplanned Hospital Visits - Hospital',
+ '/Users/Shared/hospital_quality_data/Unplanned_Hospital_Visits-Hospital.csv',
+ (SELECT COUNT(*) FROM raw_unplanned_visits)),
+('dgck-syfz', 'Patient Survey (HCAHPS) - Hospital',
+ '/Users/Shared/hospital_quality_data/HCAHPS-Hospital.csv',
+ (SELECT COUNT(*) FROM raw_patient_survey)),
+('rrqw-56er', 'Medicare Spending Per Beneficiary - Hospital',
+ '/Users/Shared/hospital_quality_data/Medicare_Hospital_Spending_Per_Patient-Hospital.csv',
+ (SELECT COUNT(*) FROM raw_spending));
+
 
 -- 6. Load checks
 \echo '=== 6. Load checks ==='
 
 \echo ''
 \echo '--- 6a. Rows in raw files vs rows loaded'
-SELECT 'complications_deaths' AS source,
-       (SELECT COUNT(*) FROM staging.complications_deaths) AS raw_rows,
-       (SELECT COUNT(*) FROM fact_complications_deaths)    AS loaded_rows
-UNION ALL SELECT 'infections',
-       (SELECT COUNT(*) FROM staging.infections), (SELECT COUNT(*) FROM fact_infections)
-UNION ALL SELECT 'unplanned_visits',
-       (SELECT COUNT(*) FROM staging.unplanned_visits), (SELECT COUNT(*) FROM fact_unplanned_visits)
-UNION ALL SELECT 'patient_survey',
-       (SELECT COUNT(*) FROM staging.patient_survey), (SELECT COUNT(*) FROM fact_patient_survey)
-UNION ALL SELECT 'spending',
-       (SELECT COUNT(*) FROM staging.spending), (SELECT COUNT(*) FROM fact_spending)
-UNION ALL SELECT 'hospital_general_information',
-       (SELECT COUNT(*) FROM staging.hospital_general_information), (SELECT COUNT(*) FROM dim_hospital);
+SELECT 'hospital info' AS source,
+       (SELECT COUNT(*) FROM raw_hospital_info)         AS raw_rows,
+       (SELECT COUNT(*) FROM dim_hospital)              AS loaded_rows
+UNION ALL
+SELECT 'complications and deaths',
+       (SELECT COUNT(*) FROM raw_complications),
+       (SELECT COUNT(*) FROM fact_complications_deaths)
+UNION ALL
+SELECT 'infections',
+       (SELECT COUNT(*) FROM raw_infections),
+       (SELECT COUNT(*) FROM fact_infections)
+UNION ALL
+SELECT 'unplanned visits',
+       (SELECT COUNT(*) FROM raw_unplanned_visits),
+       (SELECT COUNT(*) FROM fact_unplanned_visits)
+UNION ALL
+SELECT 'patient survey',
+       (SELECT COUNT(*) FROM raw_patient_survey),
+       (SELECT COUNT(*) FROM fact_patient_survey)
+UNION ALL
+SELECT 'spending',
+       (SELECT COUNT(*) FROM raw_spending),
+       (SELECT COUNT(*) FROM fact_spending);
 
 \echo ''
-\echo '--- 6b. Placeholder values converted to NULL'
-SELECT 'complications_deaths' AS source, score AS raw_value, COUNT(*) AS n
-FROM staging.complications_deaths WHERE to_num(score) IS NULL GROUP BY score
+\echo '--- 6b. Rows with no score (CMS reported Not Available)'
+SELECT 'complications and deaths' AS fact_table, COUNT(*) AS total_rows,
+       SUM(CASE WHEN score IS NULL THEN 1 ELSE 0 END) AS rows_without_score
+FROM fact_complications_deaths
 UNION ALL
-SELECT 'infections', score, COUNT(*)
-FROM staging.infections WHERE to_num(score) IS NULL GROUP BY score
+SELECT 'infections', COUNT(*), SUM(CASE WHEN score IS NULL THEN 1 ELSE 0 END)
+FROM fact_infections
 UNION ALL
-SELECT 'unplanned_visits', score, COUNT(*)
-FROM staging.unplanned_visits WHERE to_num(score) IS NULL GROUP BY score
+SELECT 'unplanned visits', COUNT(*), SUM(CASE WHEN score IS NULL THEN 1 ELSE 0 END)
+FROM fact_unplanned_visits
 UNION ALL
-SELECT 'spending', score, COUNT(*)
-FROM staging.spending WHERE to_num(score) IS NULL GROUP BY score
-ORDER BY source, n DESC;
-
--- remove staging tables
-DROP SCHEMA staging CASCADE;
+SELECT 'spending', COUNT(*), SUM(CASE WHEN mspb_ratio IS NULL THEN 1 ELSE 0 END)
+FROM fact_spending;
 
 \echo ''
-\echo '--- 6d. Column data types'
+\echo '--- 6c. Column data types'
 SELECT table_name, column_name, data_type
 FROM information_schema.columns
 WHERE table_schema = 'public' AND data_type <> 'text'
 ORDER BY table_name, ordinal_position;
+
 
 -- 7. Exploratory queries
 \echo '=== 7. Exploratory queries ==='
@@ -469,30 +429,33 @@ UNION ALL SELECT 'fact_spending', COUNT(*) FROM fact_spending;
 \echo ''
 \echo '--- 7b. Measures per domain'
 SELECT measure_domain, COUNT(*) AS measures
-FROM dim_measure GROUP BY measure_domain ORDER BY measures DESC;
+FROM dim_measure
+GROUP BY measure_domain
+ORDER BY measures DESC;
 
 \echo ''
 \echo '--- 7c. Hospitals by type and ownership'
 SELECT hospital_type, hospital_ownership,
-       COUNT(*)                                        AS hospitals,
+       COUNT(*)                                           AS hospitals,
        ROUND(100.0 * COUNT(overall_rating) / COUNT(*), 1) AS pct_rated,
-       ROUND(AVG(overall_rating), 2)                   AS avg_star_rating
+       ROUND(AVG(overall_rating), 2)                      AS avg_star_rating
 FROM dim_hospital
 GROUP BY hospital_type, hospital_ownership
 ORDER BY hospitals DESC;
 
 \echo ''
 \echo '--- 7d. Overall star rating distribution'
-SELECT overall_rating, COUNT(*) AS hospitals,
-       ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 1) AS pct
-FROM dim_hospital GROUP BY overall_rating ORDER BY overall_rating;
+SELECT overall_rating, COUNT(*) AS hospitals
+FROM dim_hospital
+GROUP BY overall_rating
+ORDER BY overall_rating;
 
 \echo ''
-\echo '--- 7e. Spending ratio summary'
-SELECT COUNT(mspb_ratio)                                             AS hospitals_with_score,
-       MIN(mspb_ratio) AS min_ratio, MAX(mspb_ratio) AS max_ratio,
-       ROUND(AVG(mspb_ratio), 3)                                     AS avg_ratio,
-       PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY mspb_ratio)       AS median_ratio
+\echo '--- 7e. Spending ratio summary (1.00 = national median)'
+SELECT COUNT(mspb_ratio)         AS hospitals_with_score,
+       MIN(mspb_ratio)           AS min_ratio,
+       MAX(mspb_ratio)           AS max_ratio,
+       ROUND(AVG(mspb_ratio), 3) AS avg_ratio
 FROM fact_spending;
 
 \echo ''
@@ -501,49 +464,47 @@ SELECT h.overall_rating,
        COUNT(*)                    AS hospitals,
        ROUND(AVG(s.mspb_ratio), 3) AS avg_spending_ratio
 FROM fact_spending s
-JOIN dim_hospital h USING (facility_id)
+JOIN dim_hospital h ON h.facility_id = s.facility_id
 WHERE h.overall_rating IS NOT NULL AND s.mspb_ratio IS NOT NULL
 GROUP BY h.overall_rating
 ORDER BY h.overall_rating;
 
 \echo ''
-\echo '--- 7g. Patient survey stars by spending quintile'
-WITH spend AS (
-    SELECT facility_id, mspb_ratio,
-           NTILE(5) OVER (ORDER BY mspb_ratio) AS spending_quintile
-    FROM fact_spending
-    WHERE mspb_ratio IS NOT NULL
-)
-SELECT sp.spending_quintile,
-       ROUND(MIN(sp.mspb_ratio), 2) || ' - ' || ROUND(MAX(sp.mspb_ratio), 2) AS ratio_range,
-       COUNT(ps.star_rating)            AS hospitals_with_survey_star,
-       ROUND(AVG(ps.star_rating), 2)    AS avg_patient_star
-FROM spend sp
-LEFT JOIN fact_patient_survey ps
-       ON ps.facility_id = sp.facility_id AND ps.measure_id = 'H_STAR_RATING'
-GROUP BY sp.spending_quintile
-ORDER BY sp.spending_quintile;
+\echo '--- 7g. Patient survey stars by spending level'
+SELECT CASE WHEN s.mspb_ratio < 0.95 THEN '1. Low (below 0.95)'
+            WHEN s.mspb_ratio <= 1.05 THEN '2. Average (0.95 to 1.05)'
+            ELSE '3. High (above 1.05)' END AS spending_level,
+       COUNT(ps.star_rating)          AS hospitals,
+       ROUND(AVG(ps.star_rating), 2)  AS avg_patient_stars
+FROM fact_spending s
+JOIN fact_patient_survey ps ON ps.facility_id = s.facility_id
+WHERE ps.measure_id = 'H_STAR_RATING'
+  AND s.mspb_ratio IS NOT NULL
+  AND ps.star_rating IS NOT NULL
+GROUP BY spending_level
+ORDER BY spending_level;
 
 \echo ''
 \echo '--- 7h. Mortality results worse than national, by ownership'
 SELECT h.hospital_ownership,
-       COUNT(*) FILTER (WHERE f.compared_to_national IS NOT NULL)         AS rated_results,
-       ROUND(100.0 * COUNT(*) FILTER (WHERE f.compared_to_national ILIKE 'Worse%')
-             / NULLIF(COUNT(*) FILTER (WHERE f.compared_to_national IS NOT NULL), 0), 2)
-                                                                           AS pct_worse
+       COUNT(f.compared_to_national) AS rated_results,
+       SUM(CASE WHEN f.compared_to_national LIKE 'Worse%' THEN 1 ELSE 0 END) AS worse_results,
+       ROUND(100.0 * SUM(CASE WHEN f.compared_to_national LIKE 'Worse%' THEN 1 ELSE 0 END)
+             / COUNT(f.compared_to_national), 2) AS pct_worse
 FROM fact_complications_deaths f
-JOIN dim_hospital h USING (facility_id)
+JOIN dim_hospital h ON h.facility_id = f.facility_id
 WHERE f.measure_id LIKE 'MORT%'
+  AND f.compared_to_national IS NOT NULL
 GROUP BY h.hospital_ownership
-ORDER BY pct_worse DESC NULLS LAST;
+ORDER BY pct_worse DESC;
 
 \echo ''
-\echo '--- 7i. Average infection ratio (SIR) by measure'
+\echo '--- 7i. Average infection ratio (SIR) by measure (1.0 = national benchmark)'
 SELECT m.measure_id, m.measure_name,
-       COUNT(f.score)          AS hospitals_reporting,
-       ROUND(AVG(f.score), 3)  AS avg_sir
+       COUNT(f.score)         AS hospitals_reporting,
+       ROUND(AVG(f.score), 3) AS avg_sir
 FROM fact_infections f
-JOIN dim_measure m USING (measure_id)
+JOIN dim_measure m ON m.measure_id = f.measure_id
 WHERE f.measure_id LIKE '%SIR'
 GROUP BY m.measure_id, m.measure_name
 ORDER BY m.measure_id;
@@ -551,11 +512,11 @@ ORDER BY m.measure_id;
 \echo ''
 \echo '--- 7j. Spending and star rating by state'
 SELECT h.state,
-       COUNT(DISTINCT h.facility_id)   AS hospitals,
+       COUNT(s.mspb_ratio)             AS hospitals_with_spending,
        ROUND(AVG(s.mspb_ratio), 3)     AS avg_spending_ratio,
        ROUND(AVG(h.overall_rating), 2) AS avg_star_rating
 FROM dim_hospital h
-LEFT JOIN fact_spending s USING (facility_id)
+LEFT JOIN fact_spending s ON s.facility_id = h.facility_id
 GROUP BY h.state
 HAVING COUNT(s.mspb_ratio) >= 10
 ORDER BY avg_spending_ratio DESC;
@@ -566,7 +527,7 @@ SELECT h.state,
        COUNT(f.score)         AS hospitals_reporting,
        ROUND(AVG(f.score), 2) AS avg_hf_readmission_rate_pct
 FROM fact_unplanned_visits f
-JOIN dim_hospital h USING (facility_id)
+JOIN dim_hospital h ON h.facility_id = f.facility_id
 WHERE f.measure_id = 'READM_30_HF'
 GROUP BY h.state
 HAVING COUNT(f.score) >= 5
@@ -574,28 +535,26 @@ ORDER BY avg_hf_readmission_rate_pct DESC
 LIMIT 10;
 
 \echo ''
-\echo '--- 7l. Measurement periods'
+\echo '--- 7l. Measurement periods by domain'
 SELECT m.measure_domain, p.start_date, p.end_date, COUNT(*) AS results
-FROM (
-    SELECT measure_id, period_id FROM fact_complications_deaths
-    UNION ALL SELECT measure_id, period_id FROM fact_infections
-    UNION ALL SELECT measure_id, period_id FROM fact_unplanned_visits
-    UNION ALL SELECT measure_id, period_id FROM fact_patient_survey
-    UNION ALL SELECT measure_id, period_id FROM fact_spending
-) f
-JOIN dim_measure m USING (measure_id)
-LEFT JOIN dim_period p USING (period_id)
+FROM (SELECT measure_id, period_id FROM fact_complications_deaths
+      UNION ALL SELECT measure_id, period_id FROM fact_infections
+      UNION ALL SELECT measure_id, period_id FROM fact_unplanned_visits
+      UNION ALL SELECT measure_id, period_id FROM fact_patient_survey
+      UNION ALL SELECT measure_id, period_id FROM fact_spending) f
+JOIN dim_measure m ON m.measure_id = f.measure_id
+LEFT JOIN dim_period p ON p.period_id = f.period_id
 GROUP BY m.measure_domain, p.start_date, p.end_date
 ORDER BY m.measure_domain, p.start_date;
 
 \echo ''
 \echo '--- 7m. Spot check one hospital (compare with medicare.gov/care-compare)'
-SELECT h.facility_id, h.facility_name, h.city_town, h.state, h.hospital_ownership,
-       h.overall_rating, s.mspb_ratio,
-       (SELECT star_rating FROM fact_patient_survey p
-         WHERE p.facility_id = h.facility_id AND p.measure_id = 'H_STAR_RATING') AS patient_survey_stars
+SELECT h.facility_id, h.facility_name, h.city_town, h.state,
+       h.overall_rating, s.mspb_ratio, ps.star_rating AS patient_survey_stars
 FROM dim_hospital h
-LEFT JOIN fact_spending s USING (facility_id)
+LEFT JOIN fact_spending s        ON s.facility_id = h.facility_id
+LEFT JOIN fact_patient_survey ps ON ps.facility_id = h.facility_id
+                                AND ps.measure_id = 'H_STAR_RATING'
 WHERE h.facility_id = '010001';
 
 \echo ''
