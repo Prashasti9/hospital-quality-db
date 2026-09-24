@@ -97,8 +97,11 @@ Metabase runs in Docker. After starting it (`docker start metabase`) and creatin
 Metabase account, connect it with:
 
 ```
-python3 extras/metabase_setup.py
+python3 metabase/metabase_setup.py
 ```
+
+The script uses the `requests` library (included with Anaconda; otherwise run
+`pip3 install requests`).
 
 It asks for your Metabase login and postgres password, adds the database connection,
 and creates 5 questions and a dashboard in a "Group 6: Hospital Quality"
@@ -107,7 +110,7 @@ collection. You can also add the connection by hand in Admin settings > Database
 
 ## How the script works
 
-A step-by-step explanation of every script is in `extras/SCRIPTS_EXPLAINED.md`.
+A step-by-step explanation of every script is in `metabase/SCRIPTS_EXPLAINED.md`.
 
 1. Creates the `hospital_quality` database
 2. Makes temporary raw tables (all TEXT) that match the CSV columns

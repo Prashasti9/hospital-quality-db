@@ -24,9 +24,9 @@ This file explains what each script in the repo does, step by step.
 |---|---|
 | `create_and_load.sql` | Builds the database from the beginning |
 | `exploration.sql` | 13 exploratory queries (they also run at the end of the build) |
-| `extras/metabase_setup.py` | Connects Metabase to the database and creates a dashboard |
+| `metabase/metabase_setup.py` | Connects Metabase to the database and creates a dashboard |
 | `README.md` | Project overview and instructions |
-| `extras/SCRIPTS_EXPLAINED.md` | This guide |
+| `metabase/SCRIPTS_EXPLAINED.md` | This guide |
 
 ---
 
@@ -293,32 +293,37 @@ Terms in these queries:
 
 ## 3. metabase_setup.py
 
-A Python script that sets up Metabase through the Metabase API, which lets a program
-send commands to Metabase.
+A Python script that sets up Metabase through the Metabase REST API, using the
+`requests` library. It is a client for Metabase's API, the same idea as calling a
+FastAPI endpoint.
 
-Steps:
+API calls it makes, in order:
 
-1. Checks that Metabase is running at `http://localhost:3000`. If it is not, it asks
-   you to run `docker start metabase`.
-2. Logs in with your Metabase email and password.
-3. Adds the database connection, the same as Admin settings > Databases > Add database:
-   - host `host.docker.internal` (from inside Docker, this is the laptop itself)
-   - port `5432` (the default PostgreSQL port)
-   - database `hospital_quality`, user `postgres`, and the password you enter
+| Step | Request | What it does |
+|---|---|---|
+| Check Metabase is up | `GET /api/health` | If Metabase is not running, it asks you to run `docker start metabase` |
+| Log in | `POST /api/session` | Sends your email and password and gets a session token |
+| Add the database | `POST /api/database` | Sends the Postgres connection details as JSON |
+| Sync tables | `POST /api/database/{id}/sync_schema` | Tells Metabase to read the tables |
+| Make a folder | `POST /api/collection` | Creates the "Group 6: Hospital Quality" collection |
+| Save questions | `POST /api/card` (or `PUT` to update) | Saves each SQL query as a question |
+| Make a dashboard | `POST /api/dashboard`, then `PUT /api/dashboard/{id}` | Creates the dashboard and places the 5 questions on it |
 
-   If the connection already exists, the script uses it.
-4. Syncs the tables so Metabase can see all 9 tables.
-5. Creates a collection (a folder) named "Group 6: Hospital Quality".
-6. Creates 5 saved questions, each based on a SQL query: CMS files loaded, table sizes,
-   hospitals by star rating (bar chart), spending by star rating (bar chart), and a
-   sample of hospitals. Questions that already exist are updated.
-7. Creates a dashboard with the 5 questions.
-8. Prints the links to the dashboard and the collection.
+After login, every request sends the token in the `X-Metabase-Session` header.
 
-The script can be run again at any time. Run it again after rebuilding the database.
+The database connection uses:
+- host `host.docker.internal` (from inside Docker, this is the laptop itself)
+- port `5432` (the default PostgreSQL port)
+- database `hospital_quality`, user `postgres`, and the password you enter
 
-Main parts of the code:
-- `QUESTIONS = [...]`: the 5 questions, each with a name, chart type and SQL query.
-- `class Metabase`: sends requests to Metabase and prints an error message if one fails.
-- `main()`: runs the steps above in order.
+If the connection, questions or dashboard already exist, the script reuses or updates
+them instead of making copies. Run it again after rebuilding the database.
+
+Parts of the code:
+- `QUESTIONS`: the 5 questions, each with a name, chart type, size and SQL query.
+- `session = requests.Session()`: keeps the login token for all requests.
+- `api(method, path, body)`: sends one request and stops with an error message if it fails.
+- `log_in()`, `get_or_add_database()`, `sync_tables()`, `get_or_create_collection()`,
+  `save_questions()`, `create_dashboard()`: one function per step in the table above.
+- `main()`: calls the functions in order and prints the dashboard link.
 - `getpass`: asks for passwords without showing them on the screen.
