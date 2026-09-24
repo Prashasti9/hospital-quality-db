@@ -108,6 +108,8 @@ collection. You can also add the connection by hand in Admin settings > Database
 
 ## How the script works
 
+(For a plain-English walkthrough of every script, see `SCRIPTS_EXPLAINED.md`.)
+
 1. Creates the `hospital_quality` database
 2. Makes temporary raw tables (all TEXT) that match the CSV columns
 3. Downloads each CSV with curl and loads it with COPY
