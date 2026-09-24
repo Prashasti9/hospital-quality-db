@@ -25,7 +25,6 @@ This file explains what each script in the repo does, step by step.
 | `create_and_load.sql` | Builds the database from the beginning |
 | `exploration.sql` | 13 exploratory queries (they also run at the end of the build) |
 | `metabase_setup.py` | Connects Metabase to the database and creates a dashboard |
-| `run.sh` | Optional. Runs `create_and_load.sql` from Terminal instead of pgAdmin |
 | `README.md` | Project overview and instructions |
 
 ---
@@ -322,18 +321,3 @@ Main parts of the code:
 - `class Metabase`: sends requests to Metabase and prints an error message if one fails.
 - `main()`: runs the steps above in order.
 - `getpass`: asks for passwords without showing them on the screen.
-
----
-
-## 4. run.sh (optional)
-
-Runs the build from Terminal instead of pgAdmin.
-
-1. `cd "$(dirname "$0")"`: moves to the folder where the script is saved.
-2. Looks for `psql`, the Terminal version of the PSQL Tool. On a Mac it is often not
-   available by name, so the script checks the usual install folders.
-3. If `psql` is not found, it prints instructions for using the PSQL Tool in pgAdmin.
-4. Runs `create_and_load.sql` and saves the output in `build_log.txt`. `tee` shows the
-   output on the screen and saves it to the file at the same time.
-
-Run it with `./run.sh`. It asks for the postgres password.
