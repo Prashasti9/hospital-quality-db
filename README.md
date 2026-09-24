@@ -139,10 +139,11 @@ Step-by-step explanations are in `SQL_EXPLAINED.md` (SQL scripts) and
 
 - CMS uses "Not Available" and "Not Applicable" inside number columns, so we load
   everything as TEXT first and convert it afterwards.
-- Some files drop the leading zero in facility_id (010001 shows up as 10001), so we
-  pad it back to 6 characters before joining.
-- CMS retired the hospital-wide readmission measure (READM_30_HOSP_WIDE) and its
-  replacement (Hybrid_HWR) has no scores yet, so we use the heart failure readmission
-  rate (READM_30_HF) instead.
+- The CMS data dictionary lists facility_id as a number in the spending file, which
+  would drop the leading zero (010001 would become 10001). To be safe, we pad every
+  facility_id to 6 characters before joining.
+- The hospital-wide readmission measure (READM_30_HOSP_WIDE) is not in the current CMS
+  file, and its replacement (Hybrid_HWR) has no scores yet, so we use the heart failure
+  readmission rate (READM_30_HF) instead.
 - Psychiatric and children's hospitals do not receive CMS star ratings, so they appear
   as "not rated".
