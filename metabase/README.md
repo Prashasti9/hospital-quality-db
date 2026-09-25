@@ -1,299 +1,150 @@
-# SQL Scripts Guide
+# Hospital Quality vs Spending (DSAI-691 Group 6)
 
-This guide explains `create_and_load.sql` and `exploration.sql` step by step.
-The Metabase script is explained separately in `metabase/METABASE_EXPLAINED.md`.
+Group project for DSAI-691 Relational Databases at USF.
 
-## Terms used
+Team: Davey Grimes, Seth Prisament, Prashasti Srivastava, Eric Smith, Brendan Waterval
 
-- **Database**: a set of tables, similar to a workbook with many sheets.
-- **Table**: one sheet of data with rows and columns.
-- **CSV file**: a text file where each line is a row and commas separate the columns.
-- **SQL**: the language used to create tables and query data.
-- **Primary key (PK)**: a column with a unique value for every row, like an ID number.
-- **Foreign key (FK)**: a column that points to the primary key of another table. The
-  database uses it to check that the two tables match. For example, a score cannot be
-  saved for a hospital that does not exist.
-- **NULL**: no value. This is not the same as zero.
-- **pgAdmin**: the program we use to work with PostgreSQL.
-- **PSQL Tool**: a command window inside pgAdmin that can run a whole script file.
-- **Query Tool**: the SQL editor in pgAdmin, used to run one query at a time.
+## Project question
 
-## Files
+Our question is whether hospitals that spend more per Medicare patient give better care. We used public hospital data from CMS (Centers for Medicare & Medicaid
+Services) and loaded it into PostgreSQL, then connected it to Metabase for charts.
 
-| File | Purpose |
-|---|---|
-| `create_and_load.sql` | Builds the database from the beginning, then runs `exploration.sql` |
-| `exploration.sql` | 13 exploratory queries |
+## Data
 
-## Order of the build
+All data comes from the CMS Provider Data Catalog:
+https://data.cms.gov/provider-data/topics/hospitals
 
-1. Create the `hospital_quality` database
-2. Create 6 temporary raw tables
-3. Download each CSV file from CMS into `/Users/Shared/hospital_quality_data/`,
-   then load it into its raw table
-4. Create and fill the 3 dimension tables
-5. Create and fill the 5 fact tables, plus `load_log`
-6. Run the load checks
-7. Run the exploratory queries
+We used the hospital-level version of 6 datasets so everything can be joined on facility ID:
 
----
+- Hospital General Information (xubh-q36u)
+- Complications and Deaths - Hospital (ynj2-r877)
+- Healthcare Associated Infections - Hospital (77hc-ibv8)
+- Unplanned Hospital Visits - Hospital (632h-zaca)
+- Patient Survey (HCAHPS) - Hospital (dgck-syfz)
+- Medicare Spending Per Beneficiary - Hospital (rrqw-56er)
 
-## create_and_load.sql
+## Database design
 
-The script runs from top to bottom in 7 steps.
+We set it up as a star schema.
 
-### Settings
+Dimension tables:
+- dim_hospital - one row per hospital (name, state, type, ownership, star rating)
+- dim_measure - one row per measure (what was measured and which category it belongs to)
+- dim_period - the date ranges the measures cover
 
-```sql
-\set ON_ERROR_STOP on
-\pset footer off
-\pset pager off
+Fact tables (one row per hospital per measure):
+- fact_complications_deaths
+- fact_infections
+- fact_unplanned_visits
+- fact_patient_survey
+- fact_spending
+
+facility_id is the primary key in dim_hospital and a foreign key in every fact table.
+Same idea for measure_id and period_id. There is also a small load_log table that shows
+how many rows came in from each file.
+
+```mermaid
+erDiagram
+  DIM_HOSPITAL ||--o{ FACT_COMPLICATIONS_DEATHS : facility_id
+  DIM_HOSPITAL ||--o{ FACT_INFECTIONS : facility_id
+  DIM_HOSPITAL ||--o{ FACT_UNPLANNED_VISITS : facility_id
+  DIM_HOSPITAL ||--o{ FACT_PATIENT_SURVEY : facility_id
+  DIM_HOSPITAL ||--o{ FACT_SPENDING : facility_id
+  DIM_MEASURE ||--o{ FACT_COMPLICATIONS_DEATHS : measure_id
+  DIM_MEASURE ||--o{ FACT_INFECTIONS : measure_id
+  DIM_MEASURE ||--o{ FACT_UNPLANNED_VISITS : measure_id
+  DIM_MEASURE ||--o{ FACT_PATIENT_SURVEY : measure_id
+  DIM_MEASURE ||--o{ FACT_SPENDING : measure_id
+  DIM_PERIOD |o--o{ FACT_COMPLICATIONS_DEATHS : period_id
+  DIM_PERIOD |o--o{ FACT_INFECTIONS : period_id
+  DIM_PERIOD |o--o{ FACT_UNPLANNED_VISITS : period_id
+  DIM_PERIOD |o--o{ FACT_PATIENT_SURVEY : period_id
+  DIM_PERIOD |o--o{ FACT_SPENDING : period_id
 ```
 
-- `ON_ERROR_STOP on`: if any statement fails, the script stops at that point.
-- `footer off`: hides the "(5 rows)" line under each result.
-- `pager off`: shows all results at once instead of pausing at "(END)".
+## Setup
 
-Lines that start with a backslash (`\`) are commands for the PSQL Tool, not SQL. The
-Query Tool does not understand them, so this script is run in the PSQL Tool.
+### What you need
 
-### Step 1: Create the database
+- PostgreSQL and pgAdmin (same setup as class), with the `postgres` login and password
+- Docker Desktop, for Metabase
+- Python 3 with the `requests` library (included with Anaconda)
+- Internet (the script downloads the data from CMS)
 
-```sql
-\c postgres
-DROP DATABASE IF EXISTS hospital_quality WITH (FORCE);
-CREATE DATABASE hospital_quality;
-\c hospital_quality
-SET datestyle = 'ISO, MDY';
-```
+### First time only
 
-- `\c postgres`: connects to the default database. A database cannot be deleted while
-  we are connected to it, so we move out of it first.
-- `DROP DATABASE IF EXISTS ...`: deletes the old database if one exists, so every run
-  starts from zero. `WITH (FORCE)` closes other connections to it, such as Metabase.
-- `CREATE DATABASE hospital_quality`: creates a new, empty database.
-- `\c hospital_quality`: connects to the new database. Everything after this line
-  happens inside it.
-- `SET datestyle = 'ISO, MDY'`: tells PostgreSQL that a date like `07/01/2024` is
-  month/day/year, which is the format CMS uses.
+1. Get the code:
+   ```
+   cd ~
+   git clone https://github.com/Prashasti9/hospital-quality-db.git
+   ```
+2. Set up Metabase in Docker. Open Docker Desktop, then in Terminal:
+   ```
+   docker run -d --name metabase -p 3000:3000 -v metabase-data:/metabase-data -e MB_DB_FILE=/metabase-data/metabase.db metabase/metabase:latest
+   ```
+   Wait about 2 minutes, open http://localhost:3000 and create your Metabase account.
+   You can skip the "add your data" step.
 
-### Step 2: Raw tables
+If you already have a Metabase container, skip step 2.
 
-```sql
-CREATE TEMP TABLE raw_hospital_info (
-    facility_id TEXT, facility_name TEXT, address TEXT, ...
-);
-```
+### Every time
 
-- There are 6 raw tables, one for each CSV file.
-- `TEMP` means the table is temporary. It is deleted automatically when the script
-  finishes.
-- Every column is `TEXT`. CMS writes words such as "Not Available" inside number
-  columns. Loading those into a number column would fail, so we load everything as
-  text first and convert it in step 5.
-- The columns are in the same order as the columns in the CSV file.
+1. **Build the database.** In pgAdmin, click your server and open the PSQL Tool
+   (the `>_` button). Run (change `yourname` to your Mac username):
+   ```
+   \i '/Users/yourname/hospital-quality-db/create_and_load.sql'
+   ```
+   Wait a few minutes until it prints `BUILD COMPLETE`, then refresh Databases in pgAdmin.
+2. **Start Metabase** (Docker Desktop must be open):
+   ```
+   docker start metabase
+   ```
+3. **Connect Metabase:**
+   ```
+   cd ~/hospital-quality-db
+   python3 metabase/metabase_setup.py
+   ```
+   Enter your Metabase login and Postgres password, then open the dashboard link it prints.
 
-### Step 3: Download and load the CMS files
+The build script downloads each CSV file into `/Users/Shared/hospital_quality_data/`
+and then loads it. At the end it runs 13 exploratory queries (section 7 of the script),
+so their results appear in the same window. The same queries are also saved in
+`exploration.sql`. To run one query at a time, open `exploration.sql` in the Query Tool
+on `hospital_quality`, highlight a query and press F5.
 
-```sql
-COPY raw_hospital_info FROM PROGRAM
-    'mkdir -p /Users/Shared/hospital_quality_data && cd /Users/Shared/hospital_quality_data
-     && curl -sSfL -o Hospital_General_Information.csv "https://data.cms.gov/...xubh-q36u/..."
-     && cat Hospital_General_Information.csv'
-    WITH (FORMAT csv, HEADER true);
-```
+The script drops and recreates the database every time, so it can be run again.
 
-Each file is first downloaded and saved as a CSV file, and then loaded into its raw
-table. The text inside the quotes is a list of Mac Terminal commands. `&&` means "then, if the
-previous command worked":
+We run it in the PSQL Tool instead of the Query Tool because the script creates the
+database and then connects to it, and the Query Tool cannot switch databases in the
+middle of a script.
 
-1. `mkdir -p /Users/Shared/hospital_quality_data`: creates the folder if it does not
-   exist. Every Mac has `/Users/Shared`, and PostgreSQL is allowed to write there.
-2. `cd ...`: moves into that folder.
-3. `curl ... -o Hospital_General_Information.csv "https://..."`: downloads the file
-   from the CMS website and saves it in the folder. The link contains the permanent
-   dataset ID (`xubh-q36u`), so it still works after CMS updates the data.
-4. `cat Hospital_General_Information.csv`: reads the file so COPY can load it.
+Metabase can also be connected by hand: Admin settings > Databases > Add database >
+PostgreSQL, with host `host.docker.internal`, port 5432, database `hospital_quality`.
 
-The rest of the statement:
-- `COPY raw_hospital_info FROM PROGRAM ...`: loads the output of those commands into
-  the raw table.
-- `FORMAT csv`: the data is separated by commas.
-- `HEADER true`: skips the first line, which has the column names.
+## How the script works
 
-The same statement is repeated for all 6 files. If a download fails, for example with
-no internet, the script stops with an error.
+Step-by-step explanations are in `SQL_EXPLAINED.md` (SQL scripts) and
+`metabase/METABASE_EXPLAINED.md` (Metabase setup and script).
 
-### Step 4: Dimension tables
+1. Creates the `hospital_quality` database
+2. Makes temporary raw tables (all TEXT) that match the CSV columns
+3. Downloads each CSV with curl and loads it with COPY
+4. Creates the dimension and fact tables with primary and foreign keys
+5. Uses INSERT INTO ... SELECT to clean the raw data and fill the final tables
+   (text like "Not Available" becomes NULL, numbers and dates get proper types)
+6. Runs some checks (raw rows vs loaded rows, data types)
+7. Runs 13 exploratory queries, such as star rating by ownership, spending vs star
+   rating, and readmissions by state (the same queries are in `exploration.sql`)
 
-```sql
-CREATE TABLE dim_hospital (
-    facility_id        TEXT     PRIMARY KEY,
-    facility_name      TEXT     NOT NULL,
-    state              CHAR(2)  NOT NULL,
-    emergency_services BOOLEAN,
-    overall_rating     SMALLINT CHECK (overall_rating BETWEEN 1 AND 5),
-    ...
-);
-```
+## Data issues we found
 
-- `dim_hospital` has one row per hospital. `facility_id` is the primary key.
-- `facility_id` and `zip_code` are stored as text because they have leading zeros
-  (`010001`). Storing them as numbers would remove the zeros.
-- `NOT NULL`: the column must have a value.
-- `CHAR(2)`: exactly 2 characters, for state codes such as `CA`.
-- `BOOLEAN`: true or false.
-- `SMALLINT CHECK (... BETWEEN 1 AND 5)`: a small whole number between 1 and 5. The
-  database rejects any other value.
-
-Two more dimension tables are created:
-- `dim_measure`: one row per measure (for example, the heart failure death rate), with
-  its category.
-- `dim_period`: one row per date range. `SERIAL` numbers the rows 1, 2, 3 automatically.
-
-The dimension tables are filled from the raw tables:
-
-```sql
-INSERT INTO dim_hospital
-SELECT LPAD(facility_id, 6, '0'),
-       ...
-       CASE emergency_services WHEN 'Yes' THEN TRUE WHEN 'No' THEN FALSE END,
-       COALESCE(meets_birthing_friendly = 'Y', FALSE),
-       CASE WHEN hospital_overall_rating IN ('1','2','3','4','5')
-            THEN hospital_overall_rating::SMALLINT END
-FROM raw_hospital_info;
-```
-
-- `INSERT INTO ... SELECT ...`: copies rows from one table to another and cleans them
-  at the same time.
-- `LPAD(facility_id, 6, '0')`: adds zeros on the left until the ID has 6 characters.
-  Some CMS files write `10001` instead of `010001`.
-- `CASE ... WHEN 'Yes' THEN TRUE ...`: changes Yes/No into true/false.
-- `COALESCE(x = 'Y', FALSE)`: the birthing friendly column is either "Y" or blank. The
-  result is true for "Y" and false otherwise.
-- `CASE WHEN rating IN ('1',...,'5') THEN rating::SMALLINT END`: keeps only ratings from
-  1 to 5 and converts them to numbers. Any other value, such as "Not Available", becomes
-  NULL. `::SMALLINT` converts text to a number.
-
-For `dim_measure`, `GROUP BY measure_id` gives one row per measure, and `UNION ALL`
-combines the measures from all 5 files into one list.
-
-For `dim_period`, `UNION` combines the date ranges from all files and removes
-duplicates. `start_date::DATE` converts the text to a date.
-
-### Step 5: Fact tables
-
-```sql
-CREATE TABLE fact_complications_deaths (
-    facility_id  TEXT NOT NULL REFERENCES dim_hospital (facility_id),
-    measure_id   TEXT NOT NULL REFERENCES dim_measure (measure_id),
-    period_id    INTEGER REFERENCES dim_period (period_id),
-    score        NUMERIC,
-    ...
-    PRIMARY KEY (facility_id, measure_id)
-);
-```
-
-- Each row is one hospital's result on one measure.
-- `REFERENCES dim_hospital (facility_id)` is a foreign key. The database checks that
-  every facility ID in this table also exists in `dim_hospital`.
-- `PRIMARY KEY (facility_id, measure_id)`: each hospital can have only one result per
-  measure.
-- `NUMERIC`: a number that can have decimals.
-
-There are 5 fact tables: complications and deaths, infections, unplanned visits,
-patient survey, and spending. With the 3 dimension tables, they form a star schema:
-the fact tables are in the middle and each one links to the dimension tables.
-
-The fact tables are filled like this:
-
-```sql
-INSERT INTO fact_complications_deaths
-SELECT h.facility_id, r.measure_id, p.period_id,
-       NULLIF(NULLIF(r.compared_to_national, 'Not Available'), ''),
-       CASE WHEN r.score ~ '^-?[0-9.]+$' THEN r.score::NUMERIC END,
-       ...
-FROM raw_complications r
-JOIN dim_hospital h ON h.facility_id = LPAD(r.facility_id, 6, '0')
-LEFT JOIN dim_period p ON p.start_date = NULLIF(r.start_date, '')::DATE
-                      AND p.end_date   = NULLIF(r.end_date, '')::DATE;
-```
-
-- `NULLIF(x, 'Not Available')`: returns NULL when the value is "Not Available". The
-  second `NULLIF` does the same for empty text.
-- `CASE WHEN r.score ~ '^-?[0-9.]+$' THEN r.score::NUMERIC END`: `~` compares the value
-  with a pattern. This pattern allows only digits, a decimal point and a minus sign, so
-  it checks whether the value is a number. Numbers are converted. Anything else, such
-  as "Not Available" or "--", becomes NULL.
-- `REPLACE(x, ',', '')` (used for counts): removes commas, so "1,204" becomes "1204".
-- `JOIN dim_hospital h ON ...`: keeps only rows for hospitals that are in
-  `dim_hospital`. This keeps the foreign keys valid.
-- `LEFT JOIN dim_period p ON ...`: finds the period number for each date range.
-  `LEFT JOIN` keeps the row even when no period matches.
-- `r`, `h` and `p` are short names (aliases) for the tables.
-
-### load_log table
-
-```sql
-INSERT INTO load_log (dataset_id, title, local_file, rows_loaded) VALUES
-('xubh-q36u', 'Hospital General Information', '/Users/Shared/...csv',
- (SELECT COUNT(*) FROM raw_hospital_info)), ...
-```
-
-- One row per CMS file, with its ID, name, saved location and number of rows.
-- `(SELECT COUNT(*) FROM raw_hospital_info)`: counts the rows in the raw table.
-- `loaded_at TIMESTAMP DEFAULT now()`: saves the date and time of the load.
-
-### Step 6: Load checks
-
-- **6a. Rows in raw files vs rows loaded**: compares row counts before and after
-  cleaning. Matching numbers mean no rows were lost.
-- **6b. Rows with no score**: counts results that CMS reported as "Not Available".
-  `SUM(CASE WHEN score IS NULL THEN 1 ELSE 0 END)` adds 1 for each missing score.
-- **6c. Column data types**: lists every column that is not text, to show that numbers
-  and dates have the correct types. `information_schema.columns` is a built-in table
-  where PostgreSQL lists all columns.
-
-### Step 7: Exploratory queries
-
-```sql
-\set ECHO all
-\ir exploration.sql
-\set ECHO none
-```
-
-- `\ir exploration.sql`: runs `exploration.sql` from the same folder.
-- `ECHO all`: prints each query and its title above the result. `ECHO none` turns
-  this off again.
-
-The last line printed is `BUILD COMPLETE`.
-
----
-
-## exploration.sql
-
-13 queries about the data. The file contains only SQL, so it also works in the Query
-Tool: highlight one query and press F5.
-
-| # | Question | SQL used |
-|---|---|---|
-| 1 | How many rows are in each table? | `COUNT(*)`, `UNION ALL` to combine the counts |
-| 2 | How many measures are in each category? | `GROUP BY`, `COUNT` |
-| 3 | How many hospitals are there by type and ownership, and what is their average rating? | `AVG`, `ROUND`, percent rated = rated / total x 100 |
-| 4 | How many hospitals have each star rating? | `GROUP BY overall_rating` |
-| 5 | What are the lowest, highest and average spending ratios? | `MIN`, `MAX`, `AVG` |
-| 6 | Do hospitals with more stars spend more? | `JOIN` spending to hospitals, `GROUP BY` rating |
-| 7 | Do low, average and high spending hospitals get different patient ratings? | `CASE` to put hospitals into 3 spending levels |
-| 8 | Which ownership types have more death rates worse than the national rate? | `LIKE 'Worse%'` for text starting with "Worse" |
-| 9 | What is the average infection ratio for each infection type? | `LIKE '%SIR'` for measure IDs ending in SIR |
-| 10 | What are the spending and star rating by state? | `LEFT JOIN`, `HAVING` for states with 10 or more hospitals |
-| 11 | Which 10 states have the highest heart failure readmission rate? | `ORDER BY ... DESC LIMIT 10` |
-| 12 | Which date ranges does the data cover? | `UNION ALL` of all fact tables, `JOIN` to periods |
-| 13 | Do the values for one hospital match medicare.gov? | `WHERE facility_id = '010001'` |
-
-Terms in these queries:
-- **Spending ratio (MSPB)**: Medicare spending per patient at a hospital compared with
-  the national median. 1.00 is the median, 1.10 is 10% more and 0.90 is 10% less.
-- **SIR (infection ratio)**: 1.0 means as many infections as expected. Lower is better.
-- `HAVING`: a filter on groups, used after `GROUP BY`.
-- `ROUND(x, 2)`: rounds to 2 decimal places.
+- CMS uses "Not Available" and "Not Applicable" inside number columns, so we load
+  everything as TEXT first and convert it afterwards.
+- The CMS data dictionary lists facility_id as a number in the spending file, which
+  would drop the leading zero (010001 would become 10001). To be safe, we pad every
+  facility_id to 6 characters before joining.
+- The hospital-wide readmission measure (READM_30_HOSP_WIDE) is not in the current CMS
+  file, and its replacement (Hybrid_HWR) has no scores yet, so we use the heart failure
+  readmission rate (READM_30_HF) instead.
+- Psychiatric and children's hospitals do not receive CMS star ratings, so they appear
+  as "not rated".
