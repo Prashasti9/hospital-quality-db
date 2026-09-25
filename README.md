@@ -108,9 +108,9 @@ If you already have a Metabase container, skip step 2.
 
 The build script downloads each CSV file into `/Users/Shared/hospital_quality_data/`
 and then loads it. At the end it runs 13 exploratory queries (section 7 of the script),
-so their results appear in the same window. The same queries are also saved in
-`exploration.sql`. To run one query at a time, open `exploration.sql` in the Query Tool
-on `hospital_quality`, highlight a query and press F5.
+so their results appear in the same window. To run one query again later, open
+`create_and_load.sql` in the Query Tool on `hospital_quality`, highlight just that query
+and press F5.
 
 The script drops and recreates the database every time, so it can be run again.
 
@@ -134,7 +134,7 @@ Step-by-step explanations are in `SQL_EXPLAINED.md` (SQL scripts) and
    (text like "Not Available" becomes NULL, numbers and dates get proper types)
 6. Runs some checks (raw rows vs loaded rows, data types)
 7. Runs 13 exploratory queries, such as star rating by ownership, spending vs star
-   rating, and readmissions by state (the same queries are in `exploration.sql`)
+   rating, and readmissions by state
 
 ## Data issues we found
 
