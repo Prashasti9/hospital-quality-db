@@ -17,7 +17,7 @@
 -- ====================================================================
 
 
--- Viz 1: Average rating state
+-- Viz 1: spending vs overall rating (assigned by CMS)
 -- Chart: Map or bar
 SELECT state,
        COUNT(*)                      AS hospitals,
@@ -28,70 +28,46 @@ HAVING COUNT(*) >= 5
 ORDER BY avg_rating DESC NULLS LAST;
 
 
--- Viz 2: Average spending by state
--- Chart: Map or bar
-SELECT h.state,
-       COUNT(*)                     AS hospitals,
-       ROUND(AVG(f.mspb_ratio), 3)  AS avg_spend_ratio
-FROM fact_spending f
-JOIN dim_hospital h ON h.facility_id = f.facility_id
-WHERE f.mspb_ratio IS NOT NULL
+-- Viz 2 and 3 : Average spending by state or Average patient rating by state
+-- Average HF mortality and Medicare spending by state (for US region map)
+SELECT h.state                     AS state,
+       ROUND(AVG(cd.score), 2)     AS avg_hf_mortality,
+       ROUND(AVG(s.mspb_ratio), 4) AS avg_spending_ratio,
+       COUNT(DISTINCT h.facility_id) AS n_hospitals
+FROM dim_hospital h
+JOIN fact_complications_deaths cd ON cd.facility_id = h.facility_id
+JOIN fact_spending s              ON s.facility_id  = h.facility_id
+WHERE cd.measure_id = 'MORT_30_HF'
+  AND cd.score IS NOT NULL
+  AND s.mspb_ratio IS NOT NULL
 GROUP BY h.state
-HAVING COUNT(*) >= 5
-ORDER BY avg_spend_ratio DESC;
+ORDER BY h.state;
 
 
--- Viz 3: Average star rating by spending quartile
--- Chart: Bar 
-WITH per_hospital AS (
-    SELECT s.facility_id,
-           AVG(f.mspb_ratio)  AS spend_ratio,
-           AVG(s.star_rating) AS star
-    FROM fact_spending f
-    JOIN fact_patient_survey s ON s.facility_id = f.facility_id
-    WHERE f.mspb_ratio IS NOT NULL AND s.star_rating IS NOT NULL
-    GROUP BY s.facility_id
-),
-quartiles AS (
-    SELECT spend_ratio, star,
-           NTILE(4) OVER (ORDER BY spend_ratio) AS spend_quartile
-    FROM per_hospital
-)
-SELECT spend_quartile,
-       COUNT(*)                   AS hospitals,
-       ROUND(AVG(spend_ratio), 3) AS avg_spend_ratio,
-       ROUND(AVG(star), 2)        AS avg_star
-FROM quartiles
-GROUP BY spend_quartile
-ORDER BY spend_quartile;
+-- Viz 4 
+-- Scatter: Medicare spending ratio vs. 30-day heart-failure mortality rate
+SELECT h.facility_id,
+       h.facility_name,
+       s.mspb_ratio  AS spending_ratio,     -- X axis
+       cd.score      AS mortality_rate      -- Y axis
+FROM dim_hospital h
+JOIN fact_spending s              ON s.facility_id = h.facility_id
+JOIN fact_complications_deaths cd ON cd.facility_id = h.facility_id
+WHERE cd.measure_id = 'MORT_30_HF'
+  AND cd.score IS NOT NULL
+  AND s.mspb_ratio IS NOT NULL
+ORDER BY spending_ratio;
 
-
--- Viz 4: Average mortality by spending quartile
--- Chart: Bar
-WITH mortality AS (
-    SELECT f.facility_id, AVG(f.score) AS death_rate
-    FROM fact_complications_deaths f
-    JOIN dim_measure m ON m.measure_id = f.measure_id
-    WHERE f.score IS NOT NULL
-      AND m.measure_name ILIKE '%death%'
-    GROUP BY f.facility_id
-),
-spend AS (
-    SELECT facility_id, AVG(mspb_ratio) AS spend_ratio
-    FROM fact_spending
-    WHERE mspb_ratio IS NOT NULL
-    GROUP BY facility_id
-),
-combined AS (
-    SELECT s.facility_id, s.spend_ratio, mo.death_rate,
-           NTILE(4) OVER (ORDER BY s.spend_ratio) AS spend_quartile
-    FROM spend s
-    JOIN mortality mo ON mo.facility_id = s.facility_id
-)
-SELECT spend_quartile,
-       COUNT(*)                   AS hospitals,
-       ROUND(AVG(spend_ratio), 3) AS avg_spend_ratio,
-       ROUND(AVG(death_rate), 2)  AS avg_death_rate
-FROM combined
-GROUP BY spend_quartile
-ORDER BY spend_quartile;
+-- Viz 5: patient star rating vs avg spending 
+-- Average Medicare spending ratio by patient-survey star rating
+SELECT ps.star_rating              AS patient_star_rating,
+       ROUND(AVG(s.mspb_ratio), 4) AS avg_spending_ratio,
+       COUNT(*)                    AS n_hospitals
+FROM dim_hospital h
+JOIN fact_spending s        ON s.facility_id  = h.facility_id
+JOIN fact_patient_survey ps ON ps.facility_id = h.facility_id
+WHERE ps.measure_id = 'H_STAR_RATING'
+  AND ps.star_rating IS NOT NULL
+  AND s.mspb_ratio IS NOT NULL
+GROUP BY ps.star_rating
+ORDER BY ps.star_rating;
