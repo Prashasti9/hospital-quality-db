@@ -1,6 +1,5 @@
 -- dashboard_queries_seth_prisament.sql
 -- DSAI-691 Group 6: U.S. Hospital Quality & Cost
--- Phase-3: SQL behind the Metabase dashboard.
 --
 -- Story: Does spending more actually result in better healthcare?
 --
@@ -14,6 +13,19 @@
 -- mspb_ratio: 1.0 = national average spending (higher = more expensive).
 -- star_rating: 1-5, higher = better.
 -- score (mortality): risk-adjusted 30-day death rate, % of patients, lower = better.
+
+
+-- Visualizations 
+--   Viz 1 - Map/bar: average CMS overall star rating by state. 
+--   Viz 2 - US region map: average Medicare spending ratio by state
+--           (color the map by avg_spending_ratio).
+--   Viz 3 - US region map: average 30-day heart-failure (HF) mortality by state.
+--           Same query as Viz 2, colored by avg_hf_mortality instead. Comparing
+--           it to Viz 2 shows high-spend states are not the low-mortality ones.
+--   Viz 4 - Scatter, one point per hospital: spending ratio (x) vs HF mortality
+--           (y). The hospital-level version of the spending-vs-quality question.
+--   Viz 5 - Line: average spending by patient-survey star rating (1-5). Spending
+--           falls as patient ratings rise.
 -- ====================================================================
 
 
