@@ -14,23 +14,10 @@
 -- star_rating: 1-5, higher = better.
 -- score (mortality): risk-adjusted 30-day death rate, % of patients, lower = better.
 
-
--- Visualizations 
---   Viz 1 - Map/bar: average CMS overall star rating by state. 
---   Viz 2 - US region map: average Medicare spending ratio by state
---           (color the map by avg_spending_ratio).
---   Viz 3 - US region map: average 30-day heart-failure (HF) mortality by state.
---           Same query as Viz 2, colored by avg_hf_mortality instead. Comparing
---           it to Viz 2 shows high-spend states are not the low-mortality ones.
---   Viz 4 - Scatter, one point per hospital: spending ratio (x) vs HF mortality
---           (y). The hospital-level version of the spending-vs-quality question.
---   Viz 5 - Line: average spending by patient-survey star rating (1-5). Spending
---           falls as patient ratings rise.
 -- ====================================================================
 
 
--- Viz 1: spending vs overall rating (assigned by CMS)
--- Chart: Map or bar
+--Spending vs overall rating (assigned by CMS)
 SELECT state,
        COUNT(*)                      AS hospitals,
        ROUND(AVG(overall_rating), 2) AS avg_rating
@@ -40,8 +27,7 @@ HAVING COUNT(*) >= 5
 ORDER BY avg_rating DESC NULLS LAST;
 
 
--- Viz 2 and 3 : Average spending by state or Average patient rating by state
--- Average HF mortality and Medicare spending by state (for US region map)
+-- Average Heart Failure mortality and Medicare spending by state
 SELECT h.state                     AS state,
        ROUND(AVG(cd.score), 2)     AS avg_hf_mortality,
        ROUND(AVG(s.mspb_ratio), 4) AS avg_spending_ratio,
@@ -56,12 +42,11 @@ GROUP BY h.state
 ORDER BY h.state;
 
 
--- Viz 4 
--- Scatter: Medicare spending ratio vs. 30-day heart-failure mortality rate
+-- Medicare spending ratio vs. heart-failure mortality rate, one obs per hospital
 SELECT h.facility_id,
        h.facility_name,
-       s.mspb_ratio  AS spending_ratio,     -- X axis
-       cd.score      AS mortality_rate      -- Y axis
+       s.mspb_ratio  AS spending_ratio,    
+       cd.score      AS mortality_rate      
 FROM dim_hospital h
 JOIN fact_spending s              ON s.facility_id = h.facility_id
 JOIN fact_complications_deaths cd ON cd.facility_id = h.facility_id
@@ -70,7 +55,6 @@ WHERE cd.measure_id = 'MORT_30_HF'
   AND s.mspb_ratio IS NOT NULL
 ORDER BY spending_ratio;
 
--- Viz 5: patient star rating vs avg spending 
 -- Average Medicare spending ratio by patient-survey star rating
 SELECT ps.star_rating              AS patient_star_rating,
        ROUND(AVG(s.mspb_ratio), 4) AS avg_spending_ratio,
