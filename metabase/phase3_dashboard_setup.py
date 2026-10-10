@@ -1,8 +1,21 @@
-# phase3_dashboard_setup.py
-# DSAI-691 Group 6: U.S. Hospital Quality & Cost -- Phase 3 dashboard (foundation)
+# phase3_dashboard_setup_v2.py
+# DSAI-691 Group 6: U.S. Hospital Quality & Cost -- Phase 3 dashboard (v2)
+#
+# Changes from phase3_dashboard_setup.py:
+#   - 2.3 and 2.4 combined into one line chart (2.3): readmission and death-rate
+#     distributions on one axis, as % of hospitals. 2.4 is removed and
+#     2.5-2.8 are renumbered 2.4-2.7.
+#   - 6.2 changed from a spending row chart to a U.S. state map colored by average
+#     CMS star rating, placed next to the 6.1 spending map.
+#   - Edits made by hand in Metabase on the v1 dashboard, copied in here:
+#       * new titles for K1-K3, 1.1, 1.2, 2.6, 3.1-3.4, 4.1, 4.2 (KPI names here,
+#         query titles in dashboard_queries.sql)
+#       * 3.1 and 3.2 shown as bar charts instead of scatter plots
+#       * ordinal x-axis on 1.1, 1.2, 2.6, 3.3, 3.4
+#       * tab intro cards show only the section question, centered
 #
 # Builds the Phase 3 Metabase dashboard from sql_queries_for_viz/dashboard_queries.sql:
-#   - one saved question per query (25), using a range of chart types
+#   - one saved question per query (24), using a range of chart types
 #   - 3 headline number cards (KPIs)
 #   - one dashboard with a tab per section:
 #       1. Headline  2. Distributions  3. Clinical Outcomes
@@ -19,9 +32,9 @@
 #   3. create_and_load.sql has built the hospital_quality database
 #
 # Run from the repo folder:
-#   python3 metabase/phase3_dashboard_setup.py              # create what is missing
-#   python3 metabase/phase3_dashboard_setup.py --overwrite  # also replace existing
-#   python3 metabase/phase3_dashboard_setup.py --dry-run    # only print the plan
+#   python3 metabase/phase3_dashboard_setup_v2.py              # create what is missing
+#   python3 metabase/phase3_dashboard_setup_v2.py --overwrite  # also replace existing
+#   python3 metabase/phase3_dashboard_setup_v2.py --dry-run    # only print the plan
 #
 # By default, questions and the dashboard that already exist are left alone, so
 # changes made by hand in Metabase are not lost. --overwrite replaces them with
@@ -56,7 +69,7 @@ TABS = {
         "Add a dashboard filter for state or ownership; add a one-line takeaway under each chart."),
     2: ("2. Distributions",
         "How are spending and each outcome spread across hospitals?",
-        "Mark the national median on each histogram; combine 2.3 and 2.4 into one chart."),
+        "Mark the national median on each histogram."),
     3: ("3. Clinical Outcomes",
         "Does extra spending reduce readmissions, infections, or deaths?",
         "Add a trend line or correlation number next to each scatter; click-through from a dot to hospital detail."),
@@ -68,7 +81,7 @@ TABS = {
         "Use the same for-profit / non-profit / government groups on every chart; add hospital counts as labels."),
     6: ("6. Geography",
         "Which states spend the most, and why?",
-        "Add a second map for star rating; link the map to a state filter for the other tabs."),
+        "Link the maps to a state filter for the other tabs."),
 }
 
 
@@ -79,7 +92,7 @@ TABS = {
 KPIS = [
     {
         "key": "K1", "tab": 1, "width": 8, "height": 4,
-        "name": "K1  Hospitals with a Medicare spending score",
+        "name": "Hospitals w/ Medicare spending score",
         "description": "Number of hospitals with a Medicare spending per beneficiary (MSPB) ratio, the base for most charts.",
         "display": "scalar",
         "settings": {},
@@ -93,7 +106,7 @@ WHERE measure_id = 'MSPB-1'
     },
     {
         "key": "K2", "tab": 1, "width": 8, "height": 4,
-        "name": "K2  Correlation: spending vs. CMS star rating",
+        "name": "Spending vs. CMS Star Rating",
         "description": "Pearson correlation between each hospital's spending ratio and its CMS overall star rating. "
                        "0 = no relationship; below 0 = higher spenders tend to have lower ratings.",
         "display": "scalar",
@@ -110,7 +123,7 @@ WHERE s.mspb_ratio IS NOT NULL
     },
     {
         "key": "K3", "tab": 1, "width": 8, "height": 4,
-        "name": "K3  Share of rated hospitals with 4 or 5 stars",
+        "name": "Share of Rated Hospitals, 4 and 5 Star",
         "description": "Percent of hospitals with a CMS overall rating that earn 4 or 5 stars. Compare with 1.2 by spending tier.",
         "display": "gauge",
         "settings": {
@@ -148,6 +161,7 @@ CHARTS = {
     "1.1": {
         "display": "combo", "width": 14, "height": 8,
         "settings": {
+            "graph.x_axis.scale": "ordinal",
             "graph.dimensions": ["spending_quartile"],
             "graph.metrics": ["avg_star_rating", "avg_hf_readmission_pct"],
             "series_settings": {
@@ -164,6 +178,7 @@ CHARTS = {
     "1.2": {
         "display": "bar", "width": 10, "height": 8,
         "settings": {
+            "graph.x_axis.scale": "ordinal",
             "graph.dimensions": ["spending_level"],
             "graph.metrics": ["pct_top_rated"],
             "series_settings": {"pct_top_rated": {"color": GREEN, "title": "% rated 4-5 stars"}},
@@ -201,32 +216,24 @@ CHARTS = {
         "extend": "Add data labels; explain in a text card why the two ratings cover different hospitals.",
     },
     "2.3": {
-        "display": "area", "width": 8, "height": 7,
+        "display": "line", "width": 16, "height": 7,
         "settings": {
-            "graph.dimensions": ["readmission_pct_bucket"],
-            "graph.metrics": ["hospitals"],
-            "graph.x_axis.scale": "linear",
-            "series_settings": {"hospitals": {"color": RED}},
-            "graph.x_axis.title_text": "HF readmission rate (%, lower = better)",
-            "graph.y_axis.title_text": "Hospitals",
-        },
-        "extend": "Overlay the readmission distributions for the lowest and highest spending quartiles.",
-    },
-    "2.4": {
-        "display": "line", "width": 8, "height": 7,
-        "settings": {
-            "graph.dimensions": ["mortality_pct_bucket"],
-            "graph.metrics": ["hospitals"],
+            "graph.dimensions": ["rate_pct_bucket", "outcome"],
+            "graph.metrics": ["pct_of_hospitals"],
             "graph.x_axis.scale": "linear",
             "line.interpolate": "cardinal",
             "line.marker_enabled": True,
-            "series_settings": {"hospitals": {"color": PURPLE}},
-            "graph.x_axis.title_text": "HF death rate (%, lower = better)",
-            "graph.y_axis.title_text": "Hospitals",
+            "series_settings": {
+                "HF readmission": {"color": RED},
+                "HF death": {"color": PURPLE},
+            },
+            "graph.x_axis.title_text": "30-day heart-failure rate (%, lower = better)",
+            "graph.y_axis.title_text": "% of hospitals",
+            "column_settings": pct("pct_of_hospitals"),
         },
-        "extend": "Show it as an area like 2.3 so the two outcome shapes are easy to compare.",
+        "extend": "Overlay the readmission curve for the lowest and highest spending quartiles.",
     },
-    "2.5": {
+    "2.4": {
         "display": "pie", "width": 8, "height": 7,
         "settings": {
             "pie.dimension": "sir_bucket",
@@ -237,7 +244,7 @@ CHARTS = {
         },
         "extend": "Use a green-to-red color per bucket so 'below 1.0 = better than expected' stands out.",
     },
-    "2.6": {
+    "2.5": {
         "display": "table", "width": 24, "height": 6,
         "settings": {
             "table.column_formatting": [{
@@ -250,9 +257,10 @@ CHARTS = {
         },
         "extend": "Add a bar chart of cv_pct next to the table; hide columns the audience does not need.",
     },
-    "2.7": {
+    "2.6": {
         "display": "line", "width": 12, "height": 7,
         "settings": {
+            "graph.x_axis.scale": "ordinal",
             "graph.dimensions": ["spending_quartile"],
             "graph.metrics": ["p10_pct", "median_pct", "p90_pct"],
             "series_settings": {
@@ -266,7 +274,7 @@ CHARTS = {
         },
         "extend": "Add min and max as faint lines to show the full spread.",
     },
-    "2.8": {
+    "2.7": {
         "display": "scatter", "width": 12, "height": 7,
         "settings": {
             "graph.dimensions": ["sd_mspb"],
@@ -281,11 +289,12 @@ CHARTS = {
 
     # ----- Section 3: Clinical Outcomes ------------------------------------------
     "3.1": {
-        "display": "scatter", "width": 12, "height": 8,
+        "display": "bar", "width": 12, "height": 8,
         "description": "One point per hospital with 150+ heart-failure cases: Medicare spending ratio "
                        "vs. 30-day heart-failure readmission rate. spend_percentile shows where each "
                        "hospital ranks on spending.",
         "settings": {
+            "graph.x_axis.scale": "linear",
             "graph.dimensions": ["mspb_ratio"],
             "graph.metrics": ["hf_readmission_pct"],
             "series_settings": {"hf_readmission_pct": {"color": RED}},
@@ -295,8 +304,9 @@ CHARTS = {
         "extend": "Color the dots by star_rating (breakout) to show quality and cost at once.",
     },
     "3.2": {
-        "display": "scatter", "width": 12, "height": 8,
+        "display": "bar", "width": 12, "height": 8,
         "settings": {
+            "graph.x_axis.scale": "linear",
             "graph.dimensions": ["spending_ratio"],
             "graph.metrics": ["mortality_rate"],
             "series_settings": {"mortality_rate": {"color": PURPLE}},
@@ -308,6 +318,7 @@ CHARTS = {
     "3.3": {
         "display": "line", "width": 14, "height": 8,
         "settings": {
+            "graph.x_axis.scale": "ordinal",
             "graph.dimensions": ["spending_quartile", "infection_type"],
             "graph.metrics": ["avg_infection_ratio"],
             "line.marker_enabled": True,
@@ -322,6 +333,7 @@ CHARTS = {
     "3.4": {
         "display": "bar", "width": 10, "height": 8,
         "settings": {
+            "graph.x_axis.scale": "ordinal",
             "graph.dimensions": ["spending_level"],
             "graph.metrics": ["avg_infection_sir"],
             "series_settings": {"avg_infection_sir": {"color": ORANGE, "title": "Avg infection ratio"}},
@@ -445,24 +457,24 @@ CHARTS = {
 
     # ----- Section 6: Geography ---------------------------------------------------
     "6.1": {
-        "display": "map", "width": 14, "height": 10,
+        "display": "map", "width": 12, "height": 10,
         "settings": {
             "map.type": "region",
             "map.region": "us_states",
             "map.dimension": "state",
             "map.metric": "avg_mspb",
         },
-        "extend": "Make a second map for avg_star_rating and place it next to this one.",
+        "extend": "Use matching color scales on 6.1 and 6.2 so the two maps are easy to compare.",
     },
     "6.2": {
-        "display": "row", "width": 10, "height": 10,
+        "display": "map", "width": 12, "height": 10,
         "settings": {
-            "graph.dimensions": ["state"],
-            "graph.metrics": ["avg_spending_ratio"],
-            "series_settings": {"avg_spending_ratio": {"color": BLUE, "title": "Avg spending ratio"}},
-            "graph.show_values": True,
+            "map.type": "region",
+            "map.region": "us_states",
+            "map.dimension": "state",
+            "map.metric": "avg_star_rating",
         },
-        "extend": "Show only the top and bottom 10 states (LIMIT in SQL) so it is easier to read.",
+        "extend": "Compare with 6.1: states that are dark on both maps spend more and rate higher.",
     },
     "6.3": {
         "display": "scatter", "width": 12, "height": 8,
@@ -659,16 +671,14 @@ def save_questions(db_id, collection_id, questions, overwrite):
 
 def layout(questions):
     """Place cards left to right on each tab, starting a new row when one is full.
-    Each tab starts with a text card (section question + ideas to extend)."""
+    Each tab starts with a centered text card showing the section question."""
     dashcards, tabs = [], []
     next_id = -1
     for tab_num, (tab_name, question, ideas) in TABS.items():
         tab_id = -tab_num
         tabs.append({"id": tab_id, "name": tab_name})
 
-        intro = (f"## {question}\n"
-                 f"**Ideas to extend this tab:** {ideas}  \n"
-                 f"_Hover a chart title to see its description and ideas for that chart._")
+        intro = f"## {question}\n"   # ideas stay in TABS for reference but are not shown
         dashcards.append({
             "id": next_id, "card_id": None, "dashboard_tab_id": tab_id,
             "row": 0, "col": 0, "size_x": 24, "size_y": 3,
@@ -677,6 +687,8 @@ def layout(questions):
                 "virtual_card": {"name": None, "display": "text", "visualization_settings": {},
                                  "dataset_query": {}, "archived": False},
                 "text": intro,
+                "text.align_horizontal": "center",
+                "text.align_vertical": "middle",
             },
         })
         next_id -= 1
@@ -721,7 +733,8 @@ def print_plan(questions):
     for tab_num, (tab_name, _, _) in TABS.items():
         print(f"\n{tab_name}")
         for q in (q for q in questions if q["tab"] == tab_num):
-            print(f"  {q['key']:<4} {q['display']:<8} {q['width']:>2}x{q['height']:<2}  {q['name'].split(None, 1)[1][:70]}")
+            title = q["name"].removeprefix(q["key"]).strip()
+            print(f"  {q['key']:<4} {q['display']:<8} {q['width']:>2}x{q['height']:<2}  {title[:70]}")
     types = sorted({q["display"] for q in questions})
     print(f"\n{len(questions)} charts, {len(types)} chart types: {', '.join(types)}")
 

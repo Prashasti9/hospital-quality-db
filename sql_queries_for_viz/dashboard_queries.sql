@@ -18,33 +18,27 @@
 --
 -- QUERY INDEX
 --   Section 1: Headline
---     1.1  How do star ratings and key outcomes change from the lowest- to the
---          highest-spending quartile?
---     1.2  What is the share of top-rated hospitals by spending tier?
+--     1.1  Star ratings and key outcomes change across spending quartile
+--     1.2  Share of top-rated hospitals by spending tier
 --   Section 2: Distributions
 --     2.1  How is hospital spending distributed?
 --     2.2  How are CMS overall and patient-survey star ratings distributed?
---     2.3  How are heart-failure readmission rates distributed?
---     2.4  How are heart-failure death rates distributed?
---     2.5  How are infection ratios distributed?
---     2.6  How much do spending and each outcome vary from hospital to
+--     2.3  How are heart-failure readmission and death rates distributed?
+--     2.4  How are infection ratios distributed?
+--     2.5  How much do spending and each outcome vary from hospital to
 --          hospital?
---     2.7  How widely do heart-failure readmission rates vary within each
---          spending quartile?
---     2.8  How much do spending and star ratings vary within each state?
+--     2.6  Heart-failure readmission rate variance within spending quartile
+--     2.7  How much do spending and star ratings vary within each state?
 --   Section 3: Clinical Outcomes
---     3.1  Do higher-spending hospitals have lower heart-failure readmission
---          rates?
---     3.2  Do higher-spending hospitals have lower heart-failure death rates?
---     3.3  How do infection ratios change across spending quartiles for each
---          infection type?
---     3.4  Does the average infection ratio fall as spending rises?
+--     3.1  Hospital spending vs heart-failure readmission rates
+--     3.2  Hospital spending vs heart-failure death rates
+--     3.3  Infection ratios across spending quartiles for each infection type
+--     3.4  Average infection ratio vs spending
 --     3.5  Are higher-spending hospitals more often better than the national
 --          rate on deaths and complications?
 --   Section 4: Patient Experience
---     4.1  Do hospitals with higher patient-survey ratings spend more or less?
---     4.2  Which survey topics drive the star gap between the lowest- and
---          highest-spending hospitals?
+--     4.1  Hospital patient-survey ratings vs spending
+--     4.2  Which survey topics drive the star rating gap across hospitals?
 --     4.3  Would patients at higher-spending hospitals definitely recommend
 --          them?
 --   Section 5: Ownership
@@ -53,7 +47,7 @@
 --     5.3  Do the ownership differences hold in every region of the country?
 --   Section 6: Geography
 --     6.1  Which states spend the most, and do they get better ratings?
---     6.2  How do states rank on Medicare spending?
+--     6.2  How do states compare on CMS star ratings?
 --     6.3  Do higher-spending states have lower heart-failure death rates?
 --     6.4  Do states with more for-profit hospitals spend more?
 --
@@ -82,7 +76,7 @@
 --
 -- HOW HOSPITALS ARE GROUPED BY SPENDING
 --   Quartiles (NTILE(4))   Q1 = lowest-spending 25% ... Q4 = highest
---                          -> 1.1, 2.7, 3.3, 4.2
+--                          -> 1.1, 2.6, 3.3, 4.2
 --   Spending tiers         Low < 0.95 | Average 0.95-1.05 | High > 1.05
 --                          -> 1.2, 3.4, 3.5
 --   Low-cost flag          mspb_ratio <= 1.0
@@ -97,8 +91,7 @@
 
 
 -- ----------------------------------------------------------------------------
--- 1.1  How do star ratings and key outcomes change from the lowest- to the
---      highest-spending quartile?
+-- 1.1  Star ratings and key outcomes change across spending quartile
 -- Description:  Splits hospitals into four equal-sized spending groups and
 --               compares average star rating, heart-failure readmission and
 --               death rates, and patient-safety index (PSI-90) across them.
@@ -144,7 +137,7 @@ ORDER BY quartile;
 
 
 -- ----------------------------------------------------------------------------
--- 1.2  What is the share of top-rated hospitals by spending tier?
+-- 1.2  Share of top-rated hospitals by spending tier
 -- Description:  Percent of rated hospitals in each spending tier (Low below
 --               0.95, Average 0.95 to 1.05, High above 1.05) that earn 4 or 5
 --               stars.
@@ -220,41 +213,39 @@ ORDER BY rating_type, stars;
 
 
 -- ----------------------------------------------------------------------------
--- 2.3  How are heart-failure readmission rates distributed?
--- Description:  Number of hospitals in each 1-point band of the 30-day heart-
---               failure readmission rate. Bucket 21 covers 21.00% to 21.99%.
---               Lower is better.
--- Metabase:     Bar chart. X = readmission_pct_bucket, Y = hospitals.
+-- 2.3  How are heart-failure readmission and death rates distributed?
+-- Description:  Share of hospitals in each 1-point band of the 30-day heart-
+--               failure readmission rate and the 30-day heart-failure death
+--               rate, on one chart. Bucket 21 covers 21.00% to 21.99%. Shares
+--               are used because a different number of hospitals reports each
+--               measure. Lower is better for both.
+-- Metabase:     Line chart. X = rate_pct_bucket, Y = pct_of_hospitals, series = outcome.
 -- ----------------------------------------------------------------------------
-SELECT FLOOR(r.score)::INT                                   AS readmission_pct_bucket,
+SELECT 'HF readmission'                                      AS outcome,
+       FLOOR(r.score)::INT                                   AS rate_pct_bucket,
        COUNT(*)                                              AS hospitals,
        ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 1)    AS pct_of_hospitals
 FROM fact_unplanned_visits r
 WHERE r.measure_id = 'READM_30_HF'
   AND r.score IS NOT NULL
-GROUP BY readmission_pct_bucket
-ORDER BY readmission_pct_bucket;
+GROUP BY rate_pct_bucket
 
+UNION ALL
 
--- ----------------------------------------------------------------------------
--- 2.4  How are heart-failure death rates distributed?
--- Description:  Number of hospitals in each 1-point band of the 30-day heart-
---               failure mortality rate. Bucket 11 covers 11.00% to 11.99%.
---               Lower is better.
--- Metabase:     Bar chart. X = mortality_pct_bucket, Y = hospitals.
--- ----------------------------------------------------------------------------
-SELECT FLOOR(d.score)::INT                                   AS mortality_pct_bucket,
+SELECT 'HF death'                                            AS outcome,
+       FLOOR(d.score)::INT                                   AS rate_pct_bucket,
        COUNT(*)                                              AS hospitals,
        ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 1)    AS pct_of_hospitals
 FROM fact_complications_deaths d
 WHERE d.measure_id = 'MORT_30_HF'
   AND d.score IS NOT NULL
-GROUP BY mortality_pct_bucket
-ORDER BY mortality_pct_bucket;
+GROUP BY rate_pct_bucket
+
+ORDER BY outcome, rate_pct_bucket;
 
 
 -- ----------------------------------------------------------------------------
--- 2.5  How are infection ratios distributed?
+-- 2.4  How are infection ratios distributed?
 -- Description:  Count of hospital results in each Standardized Infection
 --               Ratio (SIR) range across the six infection types; each result
 --               is one hospital on one infection type. 1.0 = the expected
@@ -278,7 +269,7 @@ ORDER BY sir_bucket;
 
 
 -- ----------------------------------------------------------------------------
--- 2.6  How much do spending and each outcome vary from hospital to hospital?
+-- 2.5  How much do spending and each outcome vary from hospital to hospital?
 -- Description:  Mean, standard deviation, min, 10th percentile, median, 90th
 --               percentile, and max for spending and each outcome. cv_pct
 --               (standard deviation as a percent of the mean) puts them on
@@ -332,8 +323,7 @@ ORDER BY cv_pct DESC;
 
 
 -- ----------------------------------------------------------------------------
--- 2.7  How widely do heart-failure readmission rates vary within each
---      spending quartile?
+-- 2.6  Heart-failure readmission rate variance within spending quartile
 -- Description:  The 10th percentile, median, and 90th percentile of the
 --               heart-failure readmission rate in each spending quartile. A
 --               wide band means hospitals that spend the same still get very
@@ -366,7 +356,7 @@ ORDER BY q.quartile;
 
 
 -- ----------------------------------------------------------------------------
--- 2.8  How much do spending and star ratings vary within each state?
+-- 2.7  How much do spending and star ratings vary within each state?
 -- Description:  Spread of spending (min, max, sd_mspb) and star ratings
 --               (sd_star_rating) among hospitals inside each state with 10+
 --               hospitals, to compare variation within states to the
@@ -399,8 +389,7 @@ ORDER BY sd_mspb DESC;
 
 
 -- ----------------------------------------------------------------------------
--- 3.1  Do higher-spending hospitals have lower heart-failure readmission
---      rates?
+-- 3.1  Hospital spending vs heart-failure readmission rates
 -- Description:  One point per hospital with 150+ heart-failure case
 --               spend_percentile shows where each hospital ranks on spending.
 -- Metabase:     Scatter. X = mspb_ratio, Y = hf_readmission_pct.
@@ -425,7 +414,7 @@ ORDER BY s.mspb_ratio;
 
 
 -- ----------------------------------------------------------------------------
--- 3.2  Do higher-spending hospitals have lower heart-failure death rates?
+-- 3.2  Hospital spending vs heart-failure death rates
 -- Description:  One point per hospital: Medicare spending ratio vs. 30-day
 --               heart-failure mortality rate. The mortality counterpart to
 --               3.1.
@@ -447,8 +436,7 @@ ORDER BY spending_ratio;
 
 
 -- ----------------------------------------------------------------------------
--- 3.3  How do infection ratios change across spending quartiles for each
---      infection type?
+-- 3.3  Infection ratios across spending quartiles for each infection type
 -- Description:  Average Standardized Infection Ratio (SIR; 1.0 = expected
 --               number of infections, lower is better) for each of the six
 --               infection types, by spending quartile.
@@ -477,7 +465,7 @@ ORDER BY m.measure_name, q.quartile;
 
 
 -- ----------------------------------------------------------------------------
--- 3.4  Does the average infection ratio fall as spending rises?
+-- 3.4  Average infection ratio vs spending
 -- Description:  Each hospital's infection ratios averaged across infection
 --               types, then averaged by spending tier. A one-bar-per-tier
 --               summary of 3.3.
@@ -539,7 +527,7 @@ ORDER BY spending_level;
 
 
 -- ----------------------------------------------------------------------------
--- 4.1  Do hospitals with higher patient-survey ratings spend more or less?
+-- 4.1  Hospital patient-survey ratings vs spending
 -- Description:  Average Medicare spending ratio for hospitals at each
 --               patient-survey (HCAHPS) star rating, 1-5.
 -- Metabase:     Line chart. X = patient_star_rating, Y = avg_spending_ratio.
@@ -560,8 +548,7 @@ ORDER BY ps.star_rating;
 
 
 -- ----------------------------------------------------------------------------
--- 4.2  Which survey topics drive the star gap between the lowest- and
---      highest-spending hospitals?
+-- 4.2  Which survey topics drive the star rating gap across hospitals?
 -- Description:  Average patient-survey star rating by topic for the lowest-
 --               vs. highest-spending quartile. star_gap = highest minus
 --               lowest, so the most negative topics are where high spenders
@@ -766,16 +753,17 @@ ORDER BY avg_mspb DESC;
 
 
 -- ----------------------------------------------------------------------------
--- 6.2  How do states rank on Medicare spending?
--- Description:  States with 10+ hospitals ranked from highest to lowest
---               average spending ratio.
--- Metabase:     Row chart. Y = state, X = avg_spending_ratio, sorted by
---               spending_rank.
+-- 6.2  How do states compare on CMS star ratings?
+-- Description:  Average CMS overall star rating for each state with 10+
+--               hospitals, with the state's star and spending ranks. Read it
+--               next to the 6.1 spending map.
+-- Metabase:     Map > Region map > "United States". Region field = state, Metric = avg_star_rating (ranks and spending show on hover).
 -- ----------------------------------------------------------------------------
-WITH state_spend AS (
+WITH state_stats AS (
     SELECT h.state,
-           COUNT(*)          AS hospitals,
-           AVG(s.mspb_ratio) AS avg_ratio
+           COUNT(*)                        AS hospitals,
+           AVG(s.mspb_ratio)               AS avg_ratio,
+           AVG(h.overall_rating)           AS avg_stars
     FROM dim_hospital h
     JOIN fact_spending s
          ON s.facility_id = h.facility_id AND s.measure_id = 'MSPB-1'
@@ -785,10 +773,12 @@ WITH state_spend AS (
 )
 SELECT state,
        hospitals,
-       ROUND(avg_ratio, 3) AS avg_spending_ratio,
+       ROUND(avg_stars, 2)                   AS avg_star_rating,
+       RANK() OVER (ORDER BY avg_stars DESC) AS star_rank,
+       ROUND(avg_ratio, 3)                   AS avg_spending_ratio,
        RANK() OVER (ORDER BY avg_ratio DESC) AS spending_rank
-FROM state_spend
-ORDER BY spending_rank;
+FROM state_stats
+ORDER BY star_rank;
 
 
 -- ----------------------------------------------------------------------------
